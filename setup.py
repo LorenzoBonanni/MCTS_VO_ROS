@@ -1,6 +1,6 @@
 from setuptools import setup
 
-package_name = 'mcts_vo_ros'
+package_name = 'mctsVoRos'
 
 setup(
     name=package_name,
