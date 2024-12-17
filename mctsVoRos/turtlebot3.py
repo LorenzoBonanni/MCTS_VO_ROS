@@ -13,18 +13,10 @@ import tf_transformations
 class TurtleBot3():
 
     def __init__(self):
-        
-        
-        #qos = QoSProfile(depth=10)
-        # self.node = rclpy.create_node('turtlebot3_DDQN_node')
         self.lidar_msg = LaserScan()
         self.odom_msg = Odometry()
         # set your desired goal: 
-        self.goal_x, self.goal_y = -1.795, -1.431 # this is for simulation change for real robot
-
-
-        # self.r = rclpy.spin_once(self.node,timeout_sec=0.25)
-
+        self.goal_x, self.goal_y = -2.783, -0.993 # this is for simulation change for real robot
         
         print("Robot initialized")
 
@@ -88,6 +80,6 @@ class TurtleBot3():
                         
         twist.angular.x = 0.0
         twist.angular.y = 0.0
-        twist.angular.z = action[1] - state[2] / 1.0
+        twist.angular.z = (action[1] - state[2] + np.pi) % (2 * np.pi) - np.pi
         print(f"Action: {twist.linear.x}, {twist.angular.z}")
         pub.publish(twist)
