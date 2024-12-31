@@ -18,7 +18,33 @@
             "type": "debugpy",
             "request": "launch",
             "program": "${file}",
-            "console": "integratedTerminal"
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "name": "DEBUGGER",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "args": [
+                "--algorithm=VANILLA_VO2",
+                "--nsim=100",
+                "--rwrd=-100",
+                "--std=0.5",
+                "--rollout=epsilon_uniform_uniform" ,
+                "--c=10" ,
+                "--num=50" ,
+                "--env=EASY" ,
+                "--eps_rollout=0.2" ,
+                "--stdRollout=1" ,
+                "--v=5" ,
+                "--a=11" ,
+                "--discount=0.95" ,
+                "--n_obs=40",
+                
+            ],
+            "console": "integratedTerminal",
+            "cwd": "${workspaceFolder}"
         }
     ]
 }

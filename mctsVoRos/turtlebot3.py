@@ -12,13 +12,18 @@ import tf_transformations
 
 class TurtleBot3():
 
-    def __init__(self):
+    def __init__(self, logger, dt):
         self.lidar_msg = LaserScan()
         self.odom_msg = Odometry()
         # set your desired goal: 
+        # X python = Unity Z
+        # Z python = Unity Y 
+        # Y python = Unity -X
+                
         self.goal_x, self.goal_y = -2.783, -0.993 # this is for simulation change for real robot
+        self.logger = logger
+        self.dt = dt
         
-        print("Robot initialized")
 
     def SetLaser(self, msg):
         self.lidar_msg = msg
@@ -31,12 +36,12 @@ class TurtleBot3():
 
     def get_odom(self):
         # read odometry pose from self.odom_msg (for domuentation check http://docs.ros.org/en/noetic/api/nav_msgs/html/msg/Odometry.html)
-        
         point = self.odom_msg.pose.pose.position
         rot = self.odom_msg.pose.pose.orientation
         self.rot_ = tf_transformations.euler_from_quaternion([rot.x, rot.y, rot.z, rot.w])
         new_pos = [-point.y, point.x]
-        heading = (self.rot_[2] + np.pi) % (2 * np.pi) - np.pi
+        # add constant 90 degrees to the heading
+        heading = ((self.rot_[2] + 1.5708) + np.pi) % (2 * np.pi) - np.pi
         return new_pos, heading
 
     def get_scan(self):
@@ -54,19 +59,6 @@ class TurtleBot3():
 
         return distances, angles
 
-    def get_goal_info(self, tb3_pos):
-
-        # compute distance euclidean distance use self.goal_x/y pose and tb3_pose.x/y
-        # compute the heading using atan2 of delta y and x
-        # subctract the actual robot rotation to heading
-        # save in distance and heading the value
-        
-
-        
-        # we round the distance dividing by 2.8 under the assumption that the max distance between 
-        # two points in the environment is approximately 3.3 meters, e.g. 3m
-        # return heading in deg
-        return distance/2.8, np.rad2deg(heading) / 180     
         
     def move(self, state, action, pub):
         # check action 0: move forward 1: turn left 2: turn right
@@ -80,6 +72,6 @@ class TurtleBot3():
                         
         twist.angular.x = 0.0
         twist.angular.y = 0.0
-        twist.angular.z = (action[1] - state[2] + np.pi) % (2 * np.pi) - np.pi
-        print(f"Action: {twist.linear.x}, {twist.angular.z}")
+        twist.angular.z = ((action[1] - state[2]) / self.dt + np.pi) % (2 * np.pi) - np.pi
         pub.publish(twist)
+        self.logger.info(f"Linear: {twist.linear.x} Anglular: {twist.angular.z}")
