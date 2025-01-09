@@ -39,10 +39,8 @@ class TurtleBot3():
         point = self.odom_msg.pose.pose.position
         rot = self.odom_msg.pose.pose.orientation
         self.rot_ = tf_transformations.euler_from_quaternion([rot.x, rot.y, rot.z, rot.w])
-        new_pos = [-point.y, point.x]
-        # add constant 90 degrees to the heading
-        heading = ((self.rot_[2] + 1.5708) + np.pi) % (2 * np.pi) - np.pi
-        return new_pos, heading
+        heading = self.rot_[2]
+        return np.array([point.x, point.y]), heading
 
     def get_scan(self):
         distances = []
@@ -54,7 +52,7 @@ class TurtleBot3():
         mask = np.where(~np.isinf(scan))[0]
         scan = np.array(scan)
 
-        distances = np.copy(scan[mask.astype(int)])
+        distances = scan[mask.astype(int)].copy()
         angles = mask * angle_increment + angle_min
 
         return distances, angles
@@ -72,6 +70,7 @@ class TurtleBot3():
                         
         twist.angular.x = 0.0
         twist.angular.y = 0.0
-        twist.angular.z = ((action[1] - state[2]) / self.dt + np.pi) % (2 * np.pi) - np.pi
+        d_theta = (action[1] - state[2] + np.pi) % (2 * np.pi) - np.pi
+        twist.angular.z = d_theta/self.dt
         pub.publish(twist)
         self.logger.info(f"Linear: {twist.linear.x} Anglular: {twist.angular.z}")
