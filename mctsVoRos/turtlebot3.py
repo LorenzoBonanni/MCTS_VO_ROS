@@ -12,7 +12,7 @@ import tf_transformations
 
 class TurtleBot3():
 
-    def __init__(self, logger, dt):
+    def __init__(self, dt):
         self.lidar_msg = LaserScan()
         self.odom_msg = Odometry()
         # set your desired goal: 
@@ -21,7 +21,6 @@ class TurtleBot3():
         # Y python = Unity -X
                 
         self.goal_x, self.goal_y = -2.783, -0.993 # this is for simulation change for real robot
-        self.logger = logger
         self.dt = dt
         
 
@@ -39,7 +38,7 @@ class TurtleBot3():
         point = self.odom_msg.pose.pose.position
         rot = self.odom_msg.pose.pose.orientation
         self.rot_ = tf_transformations.euler_from_quaternion([rot.x, rot.y, rot.z, rot.w])
-        heading = self.rot_[2]
+        heading = ((self.rot_[2]) + np.pi) % (2 * np.pi) - np.pi
         return np.array([point.x, point.y]), heading
 
     def get_scan(self):
@@ -56,21 +55,3 @@ class TurtleBot3():
         angles = mask * angle_increment + angle_min
 
         return distances, angles
-
-        
-    def move(self, state, action, pub):
-        # check action 0: move forward 1: turn left 2: turn right
-        # save the linear velocity in target_linear_velocity
-        # save the angular velocity in target_angular_velocity
-        
-        twist = Twist() 
-        twist.linear.x = action[0]
-        twist.linear.y = 0.0
-        twist.linear.z = 0.0
-                        
-        twist.angular.x = 0.0
-        twist.angular.y = 0.0
-        d_theta = (action[1] - state[2] + np.pi) % (2 * np.pi) - np.pi
-        twist.angular.z = d_theta/self.dt
-        pub.publish(twist)
-        self.logger.info(f"Linear: {twist.linear.x} Anglular: {twist.angular.z}")

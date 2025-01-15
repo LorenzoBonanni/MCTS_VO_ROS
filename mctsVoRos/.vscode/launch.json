@@ -5,46 +5,22 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Python: Current File with profiler",
+            "name": "Python Run: Current File",
             "type": "python",
             "request": "launch",
-            "module": "cProfile",
-            "args": [
-                "-o", "/tmp/tmp.prof", "${file}"
-            ]
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "envFile": "${workspaceFolder}/.env"
         },
         {
-            "name": "Python Debugger: Current File",
-            "type": "debugpy",
+            "name": "Python: Run without Debugging",
+            "type": "python",
             "request": "launch",
             "program": "${file}",
             "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}"
-        },
-        {
-            "name": "DEBUGGER",
-            "type": "debugpy",
-            "request": "launch",
-            "program": "${file}",
-            "args": [
-                "--algorithm=VANILLA_VO2",
-                "--nsim=100",
-                "--rwrd=-100",
-                "--std=0.5",
-                "--rollout=epsilon_uniform_uniform" ,
-                "--c=10" ,
-                "--num=50" ,
-                "--env=EASY" ,
-                "--eps_rollout=0.2" ,
-                "--stdRollout=1" ,
-                "--v=5" ,
-                "--a=11" ,
-                "--discount=0.95" ,
-                "--n_obs=40",
-                
-            ],
-            "console": "integratedTerminal",
-            "cwd": "${workspaceFolder}"
+            "envFile": "${workspaceFolder}/.env",
+            "justMyCode": false, // Includes all user and library code (optional)
+            "noDebug": true // Ensures the debugger is not attached
         }
     ]
 }

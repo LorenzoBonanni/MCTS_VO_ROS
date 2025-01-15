@@ -1,5 +1,6 @@
 import numpy as np
 import matplotlib.pyplot as plt
+import sys
 from matplotlib.animation import FuncAnimation
 from tqdm import tqdm
 
@@ -37,18 +38,18 @@ def debug_plots_and_animations(loopHandler):
     plot_times_rolling_mean(loopHandler.times)
     
     print("Creating Gif...")
-    goal = [loopHandler.turtlebot3.goal_x, loopHandler.turtlebot3.goal_y]
+    goal = loopHandler.s0.goal
     fig, ax = plt.subplots()
     infos = loopHandler.infos
-    obs = [loopHandler.obstacles for _ in range(len(infos))]
-    obs2 = [loopHandler.obstacles, *obs]
+    # obs2 = [loopHandler.obstacles, *obs]
     ani = FuncAnimation(
         fig,
         plot_frame2,
-        fargs=(goal, loopHandler.config, obs2, loopHandler.trajectory, ax),
+        fargs=(goal, loopHandler.config, loopHandler.obstacles, loopHandler.trajectory, ax),
         frames=tqdm(range(len(loopHandler.trajectory)), file=sys.stdout),
         save_count=None,
         cache_frame_data=False,
+        interval = 1
     )
     ani.save(f"debug/trajectory.gif", fps=150)
     plt.close(fig)
@@ -60,7 +61,7 @@ def debug_plots_and_animations(loopHandler):
     create_animation_tree_trajectory(
         goal, 
         loopHandler.config, 
-        obs, 
+        loopHandler.obstacles, 
         0, 
         'test', 
         rollout_values, 

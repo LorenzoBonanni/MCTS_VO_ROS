@@ -1,6 +1,0 @@
-repositories:
-  mcts_vo_ros_msgs:
-    type: git
-    url: https://github.com/LorenzoBonanni/mcts_vo_ros_msgs.git
-    version: master
-
