@@ -1,15 +1,15 @@
+import time
 import numpy as np
 from MCTS_VO.bettergym.compiled_utils import get_points_from_lidar
 from sklearn.cluster import DBSCAN
-import rclpy
 import tf_transformations
 import pyransac3d as pyrsc
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
-from rclpy.node import Node
+from skimage.measure import CircleModel, ransac
 
 
-RADIUS_SCALE = 2.2
+RADIUS_SCALE = 3.
 
 
 class SensorHandler():
@@ -22,23 +22,8 @@ class SensorHandler():
         self.heading = None
         self.obs_rad = None
         self.obs_pos = None
-        self.lidar_msg = LaserScan()
-        self.odom_msg = Odometry()
-        # self.odom_subscriber = self.create_subscription(
-        #     Odometry, 
-        #     'odom', 
-        #     self.callback_odom, 
-        #     1
-        # )
-        # self.lidar_subscriber = self.create_subscription(
-        #     LaserScan, 
-        #     'scan', 
-        #     self.callback_lidar, 
-        #     rclpy.qos.qos_profile_sensor_data
-        # )
-        # self.state_pub = self.create_publisher(RobotState, 'state', 1)
-        # self.obstacles_pub = self.create_publisher(Obstacles, 'obstacle', 1)
-        # self.logger = self.get_logger()
+        self.lidar_msg = None
+        self.odom_msg = None
         self.logger = logger
         self.logger.info('Sensor Handler initialized')
         
@@ -78,47 +63,38 @@ class SensorHandler():
     
     def estimate_obstacles(self):
         dist, angles = self.get_scan()
+        
         if len(dist) == 0:
             return np.empty((0, 4)), np.array([])
         pos = self.robot_position
-        points = get_points_from_lidar(dist, angles, pos)
+        heading = self.heading
+        # self.logger.info(f'Robot position: {pos}')
+        # self.logger.info(f'Distances: {dist}')
+        # self.logger.info(f'Angles: {angles}')
+        points = get_points_from_lidar(dist, angles, pos, heading)
+        # self.logger.info(f'Points: {points}')
         clusters = self.clusting_algo.fit_predict(points)
         groups = self.group_matrix(points, clusters)
         obs_pos = np.empty((0, 4))
         obs_rad = np.array([])
         for group in groups.values():
-            sph = pyrsc.Circle()
-            center, _ , radius, _ = sph.fit(group)            
-            radius *= RADIUS_SCALE
-            obs_pos = np.vstack((obs_pos, np.array([center[0], center[1], 0.0, self.max_obs_vel])))
-            obs_rad = np.append(obs_rad, radius)
+            if len(group) >= 3:
+                ransac_model, _ = ransac(group, CircleModel, min_samples=3, residual_threshold=0.05, rng=0)
+                center = ransac_model.params[0:2]
+                radius = ransac_model.params[2]
+                radius *= RADIUS_SCALE
+                obs_pos = np.vstack((obs_pos, np.array([center[0], center[1], 0.0, self.max_obs_vel])))
+                obs_rad = np.append(obs_rad, radius)
         
+        # self.logger.info(f'Obstacles: {obs_pos}')
+        # self.logger.info(f'Obstacles radius: {obs_rad}')
         return obs_pos, obs_rad
     
     def callback_lidar(self, msg):
-        self.logger.info('Lidar callback')
         if self.robot_position is None:
             return
-            
         self.SetLaser(msg)
-        self.obs_pos, self.obs_rad = self.estimate_obstacles()
-        
-        # obs_msg = Obstacles(
-        #     positions=obs_pos.flatten(),
-        #     width=obs_pos.shape[0],
-        #     height=obs_pos.shape[1],
-        #     radii=obs_rad
-        # )
-        # self.logger.info(f'Obstacles: {obs_pos.shape[0]}')
-        # self.obstacles_pub.publish(obs_msg)
 
     def callback_odom(self, msg):
-        self.logger.info('Odom callback')
         self.SetOdom(msg)
         self.robot_position, self.heading = self.get_odom()
-        # self.state_pub.publish(
-        #     RobotState(
-        #         position=robot_position,
-        #         heading=heading
-        #     )
-        # )

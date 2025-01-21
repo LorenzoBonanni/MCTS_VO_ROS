@@ -23,7 +23,7 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 
 
-MAX_STEPS = 50
+MAX_STEPS = 100
 
 # X python = Unity Z
 # Z python = Unity Y 
@@ -79,7 +79,7 @@ class LoopHandler(Node):
             [-0.92, -1.651, 0.0, 0.0],
             # [-1.82, -0.306, 0.0, 0.0]
         ])
-        self.gt_obs_rad = np.array([0.1, 0.1])
+        self.gt_obs_rad = np.array([0.105, 0.105])
         
         # (obs_pos, obs_rad)
         self.obstacles = []
@@ -89,10 +89,10 @@ class LoopHandler(Node):
             num_sim=100,
             c=10,
             environment=self.sim_env,
-            computational_budget=300,
+            computational_budget=50,
             rollout_policy=partial(
                 epsilon_uniform_uniform,
-                std_angle_rollout=0.38,
+                std_angle_rollout=2.84*self.dt,
                 eps=0.2
             ),
             discount=0.7,
@@ -124,7 +124,7 @@ class LoopHandler(Node):
             rclpy.qos.qos_profile_sensor_data
         )
         
-        seed_everything(0)
+        
 
     
     def initialize(self):
@@ -174,63 +174,53 @@ class LoopHandler(Node):
 
         
     def control_loop(self):
-
         if self.sensorHandler.lidar_msg is None or self.sensorHandler.robot_position is None:
             return
-        
-        self.logger.info(f"Step {self.i}")
-
+        # self.logger.info(f"Step {self.i}")
         self.trajectory = np.vstack((self.trajectory, self.s0.x))
+        start_time = time.time()
+        seed_everything(0)
 
-        # self.logger.info(f"State: {self.s0.x}")
-        initial_time = time.time()
         self.sensorHandler.obs_pos, self.sensorHandler.obs_rad = self.sensorHandler.estimate_obstacles()
         self.s0.obstacles = (self.sensorHandler.obs_pos, self.sensorHandler.obs_rad)
+        # self.s0.obstacles = (self.gt_obs_pos, self.gt_obs_rad+0.05)
         self.obstacles.append(self.s0.obstacles)
-
-        t = time.time() - initial_time
-        self.logger.info(f"TOTAL OBS EST: {t}")
-        action, info = self.planner.plan(self.s0, self.dt-t-0.005)
+        t1 = time.time() - start_time
+        # self.logger.info(f"Time to estimate obstacles: {t1}")
+        # self.logger.info(f"S0 State: {self.s0.x}")
+        # self.logger.info(f"Obs: {self.s0.obstacles}")
+        seed_everything(0)
+        initial_time = time.time()
+        action, info = self.planner.plan(self.s0, self.dt-t1-0.005)
         t2 = time.time() - initial_time
         # self.logger.info(f"Action: {action}")
-        self.logger.info(f"TOTAL PLANNING: {t2}")
-        # time.sleep(self.dt - t)
-        
-        # DEBUG STUFF
-        # self.actions.append(action)
-        # self.infos.append(info)
-        # END DEBUG STUFF
-        
-        # FORECAST NEXT STATE BASED ON ODOMETRY AND ACTION
-        position, heading = self.sensorHandler.robot_position, self.sensorHandler.heading
-        
-        # position = self.s0.x[:2]
-        # heading = self.s0.x[2]
-        robot_state = np.array([position[0], position[1], heading, action[0]])
-        self.logger.info(f"Actual State: {robot_state} \n Predicted State: {self.s0.x}")
-        self.move(robot_state, action, self.pub)
+        self.times.append(t2)
+        self.infos.append(info)
 
+        position, heading = self.sensorHandler.robot_position, self.sensorHandler.heading
+        robot_state = np.array([position[0], position[1], heading, self.s0.x[3]])
+        # robot_state = self.s0.x
+        self.move(self.s0.x, action, self.pub)
+
+        d = dist_to_goal(self.s0.goal, position)
+        collision = check_coll_vectorized(position, self.gt_obs_pos[:, :2], self.config.robot_radius, self.gt_obs_rad)
+        if self.i == MAX_STEPS or d<=0.2 or collision:
+            self.pub.publish(Twist())
+            self.logger.info(f"Goal Reached: {d<=0.2} Collision: {collision}")
+            pickle.dump(self.actions, open("debug/acts.pkl", 'wb'))
+            pickle.dump(self.trajectory, open("debug/trj.pkl", 'wb'))
+            # self.destroy_node()
+            raise Exception("Finished")
+        
         self.s0.x = robot_dynamics(
             state_x=robot_state,
             u=action,
             dt=self.dt
         )
-
-        self.times.append(t2)
-        
         self.i += 1
-        d = dist_to_goal(self.s0.goal, self.s0.x[:2])
-        collision = check_coll_vectorized(self.s0.x[:2], self.gt_obs_pos[:, :2], 0.2, self.gt_obs_rad)
-        if self.i == MAX_STEPS or d<=0.3 or collision:
-            self.pub.publish(Twist())
-            self.logger.info(f"Goal Reached: {d<=0.3} Collision: {collision}")
-            pickle.dump(self.actions, open("debug/acts.pkl", 'wb'))
-            pickle.dump(self.trajectory, open("debug/trj.pkl", 'wb'))
-            # self.destroy_node()
-            raise Exception("Finished")
 
 def main(args=None):
-    dt = 0.5
+    dt = 0.3
     gc.disable()
     rclpy.init(args=args)
     loopHandler = LoopHandler(dt)

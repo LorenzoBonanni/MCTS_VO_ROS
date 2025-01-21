@@ -1,8 +1,4 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
-using Unity.Robotics.UrdfImporter;
-using System;
 using rclcs;
 
 public class JointStatePublisher : MonoBehaviourRosNode
@@ -23,6 +19,7 @@ public class JointStatePublisher : MonoBehaviourRosNode
 
     protected override void StartRos()
     {
+        Random.InitState(0);
         init_msgs();
         jointStatePub = node.CreatePublisher<sensor_msgs.msg.JointState>(topicName);
 
