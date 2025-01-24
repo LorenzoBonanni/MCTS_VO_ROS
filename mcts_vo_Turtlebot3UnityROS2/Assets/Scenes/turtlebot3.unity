@@ -828,7 +828,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8753101123923135184, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: m_LocalPosition.x
-      value: 0.9885721
+      value: 1.136
       objectReference: {fileID: 0}
     - target: {fileID: 8753101123923135184, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: m_LocalPosition.y
@@ -836,7 +836,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8753101123923135184, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: m_LocalPosition.z
-      value: 0.22631004
+      value: 0.073
       objectReference: {fileID: 0}
     - target: {fileID: 8753101123923135184, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: m_LocalRotation.w
@@ -873,6 +873,10 @@ PrefabInstance:
     - target: {fileID: 8753101123923135185, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: m_Name
       value: turtlebot3_burger
+      objectReference: {fileID: 0}
+    - target: {fileID: 8753101123923135185, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
+      propertyPath: m_IsActive
+      value: 1
       objectReference: {fileID: 0}
     - target: {fileID: 8753101125198676617, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: ScanLink

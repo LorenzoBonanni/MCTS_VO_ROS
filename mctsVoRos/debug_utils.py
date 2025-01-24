@@ -32,38 +32,36 @@ def plot_times_rolling_mean(times):
     plt.savefig('times_rolling_mean.png')
 
 def debug_plots_and_animations(loopHandler):
-    print("Average time: ", np.mean(loopHandler.times))
-    print("Std time: ", np.std(loopHandler.times))
-    plot_times_distribution(loopHandler.times, np.mean(loopHandler.times), np.std(loopHandler.times))
-    plot_times_rolling_mean(loopHandler.times)
+    # print("Average time: ", np.mean(loopHandler.times))
+    # print("Std time: ", np.std(loopHandler.times))
+    # plot_times_distribution(loopHandler.times, np.mean(loopHandler.times), np.std(loopHandler.times))
+    # plot_times_rolling_mean(loopHandler.times)
     
     print("Creating Gif...")
     goal = loopHandler.s0.goal
     fig, ax = plt.subplots()
-    infos = loopHandler.infos
-    # obs2 = [loopHandler.obstacles, *obs]
     ani = FuncAnimation(
         fig,
         plot_frame2,
-        fargs=(goal, loopHandler.config, loopHandler.obstacles, loopHandler.trajectory, ax),
+        fargs=(goal, loopHandler.config, loopHandler.obstacles, loopHandler.trajectory, ax, (loopHandler.gt_obs_pos, loopHandler.gt_obs_rad), loopHandler.points_list),
         frames=tqdm(range(len(loopHandler.trajectory)), file=sys.stdout),
         save_count=None,
         cache_frame_data=False,
-        interval = 1
+        interval=1000
     )
-    ani.save(f"debug/trajectory.gif", fps=150)
+    ani.save(f"debug/trajectory.gif")
     plt.close(fig)
     
-    print("Creating animation")
-    trajectories = [i["trajectories"] for i in infos]
-    rollout_values = [i["rollout_values"] for i in infos]
+    # print("Creating animation")
+    # trajectories = [i["trajectories"] for i in infos]
+    # rollout_values = [i["rollout_values"] for i in infos]
     
-    create_animation_tree_trajectory(
-        goal, 
-        loopHandler.config, 
-        loopHandler.obstacles, 
-        0, 
-        'test', 
-        rollout_values, 
-        trajectories
-    )
+    # create_animation_tree_trajectory(
+    #     goal, 
+    #     loopHandler.config, 
+    #     loopHandler.obstacles, 
+    #     0, 
+    #     'test', 
+    #     rollout_values, 
+    #     trajectories
+    # )
