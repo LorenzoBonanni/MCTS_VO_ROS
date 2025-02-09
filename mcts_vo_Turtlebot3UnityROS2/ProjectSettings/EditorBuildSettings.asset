@@ -6,6 +6,6 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
-    path: Assets/Scenes/turtlebot3.unity
-    guid: 544a66ae6645855d1b1aa4b01c3b59f5
+    path: Assets/Scenes/turtlebot3_COPY.unity
+    guid: bb046a71dcc5b8d3e8f9b7159f7f025e
   m_configObjects: {}
