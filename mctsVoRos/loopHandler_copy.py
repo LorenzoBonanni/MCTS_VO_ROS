@@ -80,7 +80,7 @@ class LoopHandler(Node):
 
         self.pub = self.create_publisher(Twist, 'cmd_vel', 1)
         # Subscribers for obstacles and position
-        self.goal = np.array([-2.783, -0.72])
+        self.goal = np.array([-3.26, -1.61])
         
         self.i = 0
         
@@ -469,7 +469,7 @@ def main(args=None):
     gc.disable()
     print(f"Experiment: {exp_num}")
     loopHandler = LoopHandler(dt)
-    process = subprocess.Popen(["../env_build/env.x86_64"], preexec_fn=os.setpgrp)
+    process = subprocess.Popen(["../env_build/sin_env/env.x86_64"], preexec_fn=os.setpgrp)
     time.sleep(2)
     try:
         executor = SingleThreadedExecutor()
