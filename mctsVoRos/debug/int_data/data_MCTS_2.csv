@@ -1,2 +1,0 @@
-,algorithm,reachGoal,collision,Obscollision,maxSteps,nSteps,discountedReturn,undiscountedReturn,simNum,simNumStd
-0,MCTS,False,False,True,False,85,9.38384706525761,-39.06273268075944,44.166666666666664,9.224492931390312
