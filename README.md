@@ -6,6 +6,13 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
 - ROS2 Foxy
 - Unity
 
+## Repository Structure
+- `env_build/`: Contains the compiled Unity environments
+  - `sin_env/`: Sinusoidal obstacle trajectories environment
+  - `int_env/`: Intention-based obstacle trajectories environment
+- `mctsVoRos/`: Contains the Python implementation of the algorithms and experiment runner
+- `mcts_vo_Turtlebot3UnityROS2/`: Unity project implementing the simulation environment
+
 ## Installation
 
 1. Install system dependencies:
