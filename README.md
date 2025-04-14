@@ -73,6 +73,8 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
    ```
 
 ### Reproducing Paper Experiments
+**Note: All commands should be run from the `~/colcon_ws/src/MCTS_VO_ROS/mctsVoRos` directory.**
+
 ```bash
 python3 run.py
 ```
@@ -102,3 +104,41 @@ Example:
 ```bash
 python3 loopHandler_copy.py --exp_num 1 --algorithm VO-TREE
 ```
+
+## Final Directory Structure
+
+After completing the installation steps, your directory structure should look like this:
+
+```
+~/colcon_ws/src/MCTS_VO_ROS/
+├── env_build/
+│   ├── sin_env/
+│   └── int_env/
+├── mctsVoRos/
+│   ├── MCTS_VO/
+│   │   ├── bettergym/
+│   │   ├── environment_creator.py
+│   │   ├── experiment_utils.py
+│   │   ├── __init__.py
+│   │   └── mcts_utils.py
+│   ├── debug/
+│   ├── debug_utils.py
+│   ├── estimate_obs.py
+│   ├── __init__.py
+│   ├── loopHandler_copy.py
+│   ├── requirements.txt
+│   └── run.py
+├── build/
+├── install/
+├── log/
+├── mcts_vo_Turtlebot3UnityROS2/
+├── package.xml
+├── README.md
+├── resource/
+├── setup.cfg
+├── setup.py
+├── test/
+└── venv/
+```
+
+Always make sure to run the experiments from the `~/colcon_ws/src/MCTS_VO_ROS/mctsVoRos` directory to ensure correct path references.
