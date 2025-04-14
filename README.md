@@ -39,7 +39,7 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
 
 5. Return to the main project directory:
    ```bash
-   cd ../..
+   cd ..
    ```
 
 6. Create and activate a Python virtual environment:
