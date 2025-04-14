@@ -28,7 +28,7 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
 
 3. Navigate to the project directory:
    ```bash
-   cd colcon_ws/src/MCTS_VO_ROS/mctsVoRos
+   cd ~/colcon_ws/src/MCTS_VO_ROS/mctsVoRos
    ```
 
 4. Remove the existing MCTS_VO directory and clone the ROS branch:
