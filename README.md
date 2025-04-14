@@ -50,7 +50,7 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
 
 7. Install required Python packages:
    ```bash
-   pip install -r python_code/requirements.txt
+   pip install -r mctsVoRos/requirements.txt
    ```
 
 8. Build the project:
@@ -64,7 +64,7 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
 ### Important Pre-Run Requirements
 1. Navigate to the mctsVoRos directory:
    ```bash
-   cd colcon_ws/src/MCTS_VO_ROS/mctsVoRos
+   cd ~/colcon_ws/src/MCTS_VO_ROS/mctsVoRos
    ```
 
 2. Create debug directory:
