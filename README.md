@@ -23,7 +23,7 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
 
 2. Clone this repository into your colcon workspace:
    ```bash
-   git clone https://github.com/LorenzoBonanni/MCTS_VO_ROS.git colcon_ws/src/MCTS_VO_ROS
+   git clone https://github.com/LorenzoBonanni/MCTS_VO_ROS.git ~/colcon_ws/src/MCTS_VO_ROS
    ```
 
 3. Navigate to the project directory:
