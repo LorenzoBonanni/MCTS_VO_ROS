@@ -44,9 +44,12 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
 
 6. Create and activate a Python virtual environment:
    ```bash
-   python3 -m venv venv/
+   python3 -m venv --system-site-packages venv/
    source venv/bin/activate
    ```
+   `--system-site-packages` is required so that the ROS 2 Python packages
+   installed system-wide (`rclpy`, `tf_transformations`, ...) remain importable
+   from inside the environment.
 
 7. Install required Python packages:
    ```bash
@@ -106,11 +109,32 @@ To reproduce every configuration of the paper (3 algorithms x 30 runs x 2 domain
 ```bash
 ./run_all_experiments.sh
 ```
-The script writes the results of each run to `debug/<trajectories>/` (animations
-in `debug/<trajectories>/animations/`) and the console output to `logs/<trajectories>/`. Completed runs are detected and
-skipped, so the campaign can be resumed after an interruption; use `--force` to
-re-run them. Run `./run_all_experiments.sh --help` for the available options
-(number of runs, subset of algorithms, subset of domains).
+The script is self-contained and can be launched from any directory: it sources
+`/opt/ros/$ROS_DISTRO/setup.bash`, runs `colcon build` in the workspace root,
+sources `install/setup.bash`, activates `venv/` and then runs the experiments.
+Nothing has to be sourced or activated beforehand.
+
+Results of each run go to `debug/<trajectories>/` (animations in
+`debug/<trajectories>/animations/`) and the console output to
+`logs/<trajectories>/`. Completed runs are detected and skipped, so the campaign
+can be resumed after an interruption; use `--force` to re-run them.
+
+Useful options (see `./run_all_experiments.sh --help` for the full list):
+
+| Option | Effect |
+| --- | --- |
+| `-n, --num-exp N` | runs per configuration (default: 30) |
+| `-a, --algorithms "A B"` | subset of algorithms |
+| `-t, --trajectories "X Y"` | subset of domains |
+| `-f, --force` | re-run configurations that already have results |
+| `--skip-build` | source and activate, but skip `colcon build` |
+| `--skip-setup` | run in the current shell, without sourcing/building/activating |
+| `--ros-distro NAME` | ROS 2 distribution (default: `$ROS_DISTRO`, else `foxy`) |
+
+The virtual environment must be created with `--system-site-packages`, otherwise
+the ROS 2 Python packages (`rclpy`, `tf_transformations`, ...) are not visible
+from inside it. The script checks this before starting and aborts with an
+explanatory message if the environment is incomplete.
 
 ### Running Single Experiments
 ```bash
