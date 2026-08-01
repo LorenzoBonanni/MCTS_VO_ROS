@@ -1,10 +1,11 @@
+import os
 import numpy as np
 import matplotlib.pyplot as plt
 import sys
 from matplotlib.animation import FuncAnimation
 from tqdm import tqdm
 
-from MCTS_VO.experiment_utils import create_animation_tree_trajectory, plot_frame2
+from MCTS_VO.experiment_utils import plot_frame2, plot_frame_tree_traj
 
 
 WINDOW_SIZE = 5
@@ -31,13 +32,56 @@ def plot_times_rolling_mean(times):
     plt.ylim([0, 0.3])
     plt.savefig('times_rolling_mean.png')
 
-def debug_plots_and_animations(loopHandler, exp_num, algorithm):
-    # print("Average time: ", np.mean(loopHandler.times))
-    # print("Std time: ", np.std(loopHandler.times))
-    # plot_times_distribution(loopHandler.times, np.mean(loopHandler.times), np.std(loopHandler.times))
-    # plot_times_rolling_mean(loopHandler.times)
+
+def create_tree_animation(goal, config, obs, values, trajectories, out_path):
+    """
+    Create the animation of the rollout trajectories explored by the tree.
+
+    This is a local copy of MCTS_VO.experiment_utils.create_animation_tree_trajectory
+    with the output path as a parameter. The upstream helper hardcodes
+    `./debug/rollout_{exp_name}.mp4`: since the prefix ends in the middle of the
+    file name, the destination directory cannot be injected through `exp_name`
+    (passing "sinusoidal/animations/VO-TREE_0" would ask matplotlib to write into
+    a directory literally called "rollout_sinusoidal").
+
+    Args:
+        goal: Goal position of the robot.
+        config: Environment configuration (plot limits, robot radius, ...).
+        obs: Obstacles at each step.
+        values: Rollout values of each step.
+        trajectories: Rollout trajectories of each step.
+        out_path (str): Full path of the .mp4 file to write.
+    """
+    fig, _ = plt.subplots()
+    ani = FuncAnimation(
+        fig,
+        plot_frame_tree_traj,
+        fargs=(goal, config, obs, trajectories, values, fig),
+        frames=len(trajectories),
+        save_count=None,
+        cache_frame_data=False,
+    )
+    ani.save(out_path, dpi=300)
+    plt.close(fig)
+
+
+def debug_plots_and_animations(loopHandler, exp_num, algorithm, out_dir='debug'):
+    """
+    Create the debug animations of a run.
+
+    Args:
+        loopHandler: The LoopHandler holding the data of the finished run.
+        exp_num (int): Experiment number.
+        algorithm (str): Name of the algorithm used for the run.
+        out_dir (str): Output directory of the run (e.g. debug/sinusoidal).
+                       Animations are written to <out_dir>/animations.
+    """
     print("Creating Gif...")
     suffix = f'{algorithm}_{exp_num}'
+
+    # All the animations of the run live in <out_dir>/animations
+    anim_dir = os.path.join(out_dir, 'animations')
+    os.makedirs(anim_dir, exist_ok=True)
 
     goal = loopHandler.s0.goal
     fig, ax = plt.subplots()
@@ -50,7 +94,7 @@ def debug_plots_and_animations(loopHandler, exp_num, algorithm):
         cache_frame_data=False,
         # interval=1000
     )
-    ani.save(f"debug/trajectory_{suffix}.gif",)
+    ani.save(os.path.join(anim_dir, f"trajectory_{suffix}.gif"))
     plt.close(fig)
     
     if algorithm != 'VO-PLANNER':
@@ -59,12 +103,11 @@ def debug_plots_and_animations(loopHandler, exp_num, algorithm):
         trajectories = [i["trajectories"] for i in infos]
         rollout_values = [i["rollout_values"] for i in infos]
 
-        create_animation_tree_trajectory(
-            goal, 
-            loopHandler.config, 
-            loopHandler.obstacles, 
-            exp_num, 
-            suffix, 
-            rollout_values, 
-            trajectories
+        create_tree_animation(
+            goal,
+            loopHandler.config,
+            loopHandler.obstacles,
+            rollout_values,
+            trajectories,
+            os.path.join(anim_dir, f"rollout_{suffix}.mp4"),
         )

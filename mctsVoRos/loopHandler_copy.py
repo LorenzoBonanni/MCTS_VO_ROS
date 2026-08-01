@@ -32,7 +32,22 @@ from MCTS_VO.bettergym.agents.utils.vo import epsilon_uniform_uniform_vo
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--exp_num', default=0, type=int)
-parser.add_argument('--algorithm', default='VO-PLANNER', type=str)
+parser.add_argument('--algorithm', default='VO-PLANNER', type=str,
+                    choices=['MCTS', 'VO-TREE', 'VO-PLANNER'])
+parser.add_argument('--trajectories', default='sinusoidal', type=str,
+                    choices=['sinusoidal', 'intention'],
+                    help='Type of obstacle trajectories, i.e. which Unity '
+                         'environment to launch. Also determines the output '
+                         'directory (debug/<trajectories>).')
+
+# Unity build associated to each type of obstacle trajectory
+ENV_BUILDS = {
+    'sinusoidal': '../env_build/sin_env/env.x86_64',
+    'intention': '../env_build/int_env/env.x86_64',
+}
+
+# Root directory of every artifact produced by the experiments
+DEBUG_DIR = 'debug'
 
 MAX_STEPS = 350
 RADIUS_SCALE = 3
@@ -44,8 +59,15 @@ dt = 0.1
 # MCTS
 # VO-TREE
 # VO-PLANNER
-exp_num = parser.parse_args().exp_num
-algorithm = parser.parse_args().algorithm
+cli_args = parser.parse_args()
+exp_num = cli_args.exp_num
+algorithm = cli_args.algorithm
+trajectories = cli_args.trajectories
+
+# Environment executable and output directory for the selected trajectories
+env_build = ENV_BUILDS[trajectories]
+out_dir = os.path.join(DEBUG_DIR, trajectories)
+os.makedirs(out_dir, exist_ok=True)
 
 @jit(nopython=True, cache=True)
 def set_seed(value):
@@ -685,19 +707,19 @@ def save_data(loopHandler, exp_num):
     if None not in loopHandler.infos:
         # Extract the number of simulations from the infos and save it to a pickle file
         sim_num = [i["simulations"] for i in loopHandler.infos]
-        pickle.dump(sim_num, open(f"debug/sim_num_{suffix}.pkl", 'wb'))
+        pickle.dump(sim_num, open(f"{out_dir}/sim_num_{suffix}.pkl", 'wb'))
     else:
         # If infos contains None, initialize sim_num as an empty list
         sim_num = []
 
     # Save various data attributes of the loopHandler to pickle files for debugging
-    pickle.dump(loopHandler.actions, open(f"debug/acts_{suffix}.pkl", 'wb'))
-    pickle.dump(loopHandler.trajectory, open(f"debug/trj_{suffix}.pkl", 'wb'))
-    pickle.dump(loopHandler.planning_states, open(f"debug/ps_{suffix}.pkl", 'wb'))
-    pickle.dump(loopHandler.obstacles, open(f"debug/obs_{suffix}.pkl", 'wb'))
-    pickle.dump(loopHandler.obstacles_pred, open(f"debug/obsPred_{suffix}.pkl", 'wb'))
-    pickle.dump(loopHandler.times, open(f"debug/times_{suffix}.pkl", 'wb'))
-    pickle.dump(loopHandler.actions_executed, open(f"debug/actions_executed_{suffix}.pkl", 'wb'))
+    pickle.dump(loopHandler.actions, open(f"{out_dir}/acts_{suffix}.pkl", 'wb'))
+    pickle.dump(loopHandler.trajectory, open(f"{out_dir}/trj_{suffix}.pkl", 'wb'))
+    pickle.dump(loopHandler.planning_states, open(f"{out_dir}/ps_{suffix}.pkl", 'wb'))
+    pickle.dump(loopHandler.obstacles, open(f"{out_dir}/obs_{suffix}.pkl", 'wb'))
+    pickle.dump(loopHandler.obstacles_pred, open(f"{out_dir}/obsPred_{suffix}.pkl", 'wb'))
+    pickle.dump(loopHandler.times, open(f"{out_dir}/times_{suffix}.pkl", 'wb'))
+    pickle.dump(loopHandler.actions_executed, open(f"{out_dir}/actions_executed_{suffix}.pkl", 'wb'))
 
     # Calculate normalized distances to the goal
     max_eudist = loopHandler.sim_env.gym_env.max_eudist
@@ -718,6 +740,8 @@ def save_data(loopHandler, exp_num):
     # Create a dictionary to store experiment results
     data = {
         "algorithm": algorithm,
+        "trajectories": trajectories,
+        "expNum": exp_num,
         "reachGoal": loopHandler.reached_goal,
         "collision": loopHandler.collision,
         "Obscollision": loopHandler.obs_collision,
@@ -731,7 +755,7 @@ def save_data(loopHandler, exp_num):
 
     # Save the results to a CSV file for analysis
     df = pd.DataFrame([data])
-    df.to_csv(f"debug/data_{suffix}.csv")
+    df.to_csv(f"{out_dir}/data_{suffix}.csv")
         
 
 def main(args=None):
@@ -760,9 +784,10 @@ def main(args=None):
     rclpy.init(args=args)
 
     gc.disable()
-    print(f"Experiment: {exp_num}")
+    print(f"Experiment: {exp_num} | Algorithm: {algorithm} | Trajectories: {trajectories}")
+    print(f"Environment: {env_build} | Output directory: {out_dir}")
     loopHandler = LoopHandler(dt)
-    process = subprocess.Popen(["../env_build/sin_env/env.x86_64"], preexec_fn=os.setpgrp)
+    process = subprocess.Popen([env_build], preexec_fn=os.setpgrp)
     time.sleep(2)
     try:
         executor = SingleThreadedExecutor()
@@ -773,11 +798,9 @@ def main(args=None):
         # kill the environment process
         os.killpg(os.getpgid(process.pid), signal.SIGTERM)
         save_data(loopHandler, exp_num)
-        debug_plots_and_animations(loopHandler, exp_num, algorithm=algorithm)
+        debug_plots_and_animations(loopHandler, exp_num, algorithm=algorithm, out_dir=out_dir)
         gc.collect()
 
 
 if __name__ == '__main__':
     main()
-    
-

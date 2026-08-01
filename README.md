@@ -81,28 +81,44 @@ python3 run.py
 
 #### Configuration Options:
 1. **Obstacle Trajectories** (default: sinusoidal):
-   Modify `loopHandler_copy.py`:
-   ```python
-   # For sinusoidal obstacles (default)
-   process = subprocess.Popen(["../env_build/sin_env/env.x86_64"], preexec_fn=os.setpgrp)
-   
-   # For intention-based obstacles
-   # process = subprocess.Popen(["../env_build/int_env/env.x86_64"], preexec_fn=os.setpgrp)
-   ```
+   Pass the `--trajectories` argument, no source edit is needed:
+   - `sinusoidal`: sinusoidal obstacle trajectories (`env_build/sin_env`, default)
+   - `intention`: intention-based obstacle trajectories (`env_build/int_env`)
+
+   The results of a run are written to `debug/<trajectories>/`, so the two
+   domains never overwrite each other (e.g. `debug/sinusoidal`, `debug/intention`).
+   Animations (trajectory GIF and rollout MP4) go to `debug/<trajectories>/animations/`.
 
 2. **Algorithm Selection** (default: MCTS-VO):
-   Modify the `--algorithm` argument in `run.py`:
+   Pass the `--algorithm` argument:
    - `VO-TREE`: MCTS-VO (default)
    - `MCTS`: Standard MCTS
    - `VO-PLANNER`: VO-Planner
 
+Both arguments are accepted by `run.py` and by `loopHandler_copy.py`:
+```bash
+python3 run.py --algorithm VO-TREE --trajectories intention
+```
+
+### Running the Full Experimental Campaign
+To reproduce every configuration of the paper (3 algorithms x 30 runs x 2 domains
+= 180 runs) in a single command:
+```bash
+./run_all_experiments.sh
+```
+The script writes the results of each run to `debug/<trajectories>/` (animations
+in `debug/<trajectories>/animations/`) and the console output to `logs/<trajectories>/`. Completed runs are detected and
+skipped, so the campaign can be resumed after an interruption; use `--force` to
+re-run them. Run `./run_all_experiments.sh --help` for the available options
+(number of runs, subset of algorithms, subset of domains).
+
 ### Running Single Experiments
 ```bash
-python3 loopHandler_copy.py --exp_num <EXPERIMENT_NUMBER> --algorithm <ALGORITHM>
+python3 loopHandler_copy.py --exp_num <EXPERIMENT_NUMBER> --algorithm <ALGORITHM> --trajectories <TRAJECTORIES>
 ```
 Example:
 ```bash
-python3 loopHandler_copy.py --exp_num 1 --algorithm VO-TREE
+python3 loopHandler_copy.py --exp_num 1 --algorithm VO-TREE --trajectories sinusoidal
 ```
 
 ## Final Directory Structure
@@ -122,12 +138,18 @@ After completing the installation steps, your directory structure should look li
 │   │   ├── __init__.py
 │   │   └── mcts_utils.py
 │   ├── debug/
+│   │   ├── sinusoidal/
+│   │   │   └── animations/
+│   │   └── intention/
+│   │       └── animations/
+│   ├── logs/
 │   ├── debug_utils.py
 │   ├── estimate_obs.py
 │   ├── __init__.py
 │   ├── loopHandler_copy.py
 │   ├── requirements.txt
-│   └── run.py
+│   ├── run.py
+│   └── run_all_experiments.sh
 ├── build/
 ├── install/
 ├── log/
