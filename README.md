@@ -103,6 +103,25 @@ Both arguments are accepted by `run.py` and by `loopHandler_copy.py`:
 python3 run.py --algorithm VO-TREE --trajectories intention
 ```
 
+### Search Depth Metrics
+For the tree-based planners (`MCTS` and `VO-TREE`) each run also reports how deep
+the search went. Three quantities are recorded at every planning step:
+
+| Metric | Meaning |
+| --- | --- |
+| `max_tree_depth` | depth of the deepest node of the search tree (root = 0) |
+| `max_rollout_depth` | length in steps of the longest rollout |
+| `max_total_depth` | deepest state reached overall (depth at which a rollout started + its length) |
+
+The per-step values are saved to `debug/<trajectories>/depths_<ALGORITHM>_<N>.pkl`,
+and their run-level aggregates appear in `data_<ALGORITHM>_<N>.csv` as
+`maxTreeDepth`, `meanTreeDepth`, `maxRolloutDepth`, `meanRolloutDepth`,
+`maxTotalDepth` and `meanTotalDepth`. `VO-PLANNER` builds no tree, so these
+columns are `NaN` for it.
+
+The counters are updated only when a node is created and at the end of a rollout,
+never on the per-visit path of `simulate()`, so they do not slow down the planner.
+
 ### Running the Full Experimental Campaign
 To reproduce every configuration of the paper (3 algorithms x 30 runs x 2 domains
 = 180 runs) in a single command:

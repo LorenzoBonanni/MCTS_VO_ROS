@@ -704,13 +704,31 @@ def save_data(loopHandler, exp_num):
     suffix = f'{algorithm}_{exp_num}'
 
     # Check if the loopHandler's infos attribute contains valid data
-    if None not in loopHandler.infos:
+    if None not in loopHandler.infos and len(loopHandler.infos) != 0:
         # Extract the number of simulations from the infos and save it to a pickle file
         sim_num = [i["simulations"] for i in loopHandler.infos]
         pickle.dump(sim_num, open(f"{out_dir}/sim_num_{suffix}.pkl", 'wb'))
+
+        # Depth statistics of the search, one value per planning step.
+        # Only tree-based planners (MCTS, VO-TREE) produce them: VO-PLANNER
+        # returns None as info, so the columns below stay empty for it.
+        tree_depths = [i["max_tree_depth"] for i in loopHandler.infos]
+        rollout_depths = [i["max_rollout_depth"] for i in loopHandler.infos]
+        total_depths = [i["max_total_depth"] for i in loopHandler.infos]
+        pickle.dump(
+            {
+                "max_tree_depth": tree_depths,
+                "max_rollout_depth": rollout_depths,
+                "max_total_depth": total_depths,
+            },
+            open(f"{out_dir}/depths_{suffix}.pkl", 'wb')
+        )
     else:
         # If infos contains None, initialize sim_num as an empty list
         sim_num = []
+        tree_depths = []
+        rollout_depths = []
+        total_depths = []
 
     # Save various data attributes of the loopHandler to pickle files for debugging
     pickle.dump(loopHandler.actions, open(f"{out_dir}/acts_{suffix}.pkl", 'wb'))
@@ -751,6 +769,14 @@ def save_data(loopHandler, exp_num):
         "undiscountedReturn": undiscounted_return,
         "simNum": np.mean(sim_num),
         "simNumStd": np.std(sim_num),
+        # Depth statistics: "max" is over the whole run, "mean" is the average
+        # of the per-planning-step maxima. NaN for VO-PLANNER, which has no tree.
+        "maxTreeDepth": np.max(tree_depths) if tree_depths else np.nan,
+        "meanTreeDepth": np.mean(tree_depths) if tree_depths else np.nan,
+        "maxRolloutDepth": np.max(rollout_depths) if rollout_depths else np.nan,
+        "meanRolloutDepth": np.mean(rollout_depths) if rollout_depths else np.nan,
+        "maxTotalDepth": np.max(total_depths) if total_depths else np.nan,
+        "meanTotalDepth": np.mean(total_depths) if total_depths else np.nan,
     }
 
     # Save the results to a CSV file for analysis
