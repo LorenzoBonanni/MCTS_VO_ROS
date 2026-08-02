@@ -85,6 +85,27 @@ parser.add_argument('--no-plots', action='store_true',
                     help='Skip the debug plots and animations at the end of a '
                          'run. Rendering the trajectory GIF takes far longer '
                          'than the run itself, so sweeps want this.')
+parser.add_argument('--ts', default=0.1, type=float,
+                    help='Control and simulation time step in seconds. The '
+                         'robot is commanded for ts after each planning step, '
+                         'and MCTS simulates with the same step. Default 0.1 is '
+                         'the configuration of the paper.')
+parser.add_argument('--plan-budget', default=None, type=float,
+                    help='Wall-clock seconds given to the planner each step. '
+                         'The planner always spends its whole budget, so this - '
+                         'not how fast the planner is - is what sets the cycle '
+                         'time; a faster planner buys more simulations per '
+                         'budget. Default keeps the paper behaviour: whatever '
+                         'is left of one ts after sensing, with the cycle '
+                         'running at 2*ts.')
+parser.add_argument('--env-build', default=None, type=str,
+                    help='Path to the Unity build to launch, overriding the '
+                         'default for --trajectories. Use it to select a build '
+                         'with different sensor publish rates, e.g. '
+                         '../env_build/sin_env_50hz/env.x86_64')
+parser.add_argument('--suffix', default='', type=str,
+                    help='Extra tag appended to every output filename, so that '
+                         'sweeps do not overwrite each other.')
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
@@ -95,8 +116,27 @@ ENV_BUILDS = {
 # Root directory of every artifact produced by the experiments
 DEBUG_DIR = 'debug'
 
-DEPTH = 200
-dt = 0.1
+cli_args = parser.parse_args()
+dt = cli_args.ts
+PLAN_BUDGET = cli_args.plan_budget
+
+# Time the robot stands still between commands while it senses and plans. In the
+# default configuration that is one whole ts (the loop runs at 2*ts, half of it
+# stopped); with an explicit --plan-budget it collapses to the budget plus a
+# small allowance for sensing. Velocity obstacles are enlarged by it, since the
+# obstacles keep moving throughout, so shrinking it is what makes VO less
+# conservative and gives the planner back its manoeuvring room.
+SENSE_ALLOWANCE = 0.005
+if PLAN_BUDGET is None:
+    THINK_MARGIN = dt
+else:
+    THINK_MARGIN = PLAN_BUDGET + SENSE_ALLOWANCE
+
+# Planning horizon in seconds rather than in simulation steps, so it stays put
+# when the control period changes: as a fixed depth of 200 it would silently
+# halve whenever dt did. 20 s reproduces the paper's depth at ts = 0.1.
+HORIZON_S = 20.0
+DEPTH = int(round(HORIZON_S / dt))
 
 # --- Obstacle estimation from the LIDAR scan -------------------------------
 # Clustering uses the adaptive breakpoint threshold
@@ -136,7 +176,6 @@ MAX_STEPS = int(round(EPISODE_S / dt))
 # MCTS
 # VO-TREE
 # VO-PLANNER
-cli_args = parser.parse_args()
 exp_num = cli_args.exp_num
 algorithm = cli_args.algorithm
 trajectories = cli_args.trajectories
@@ -152,7 +191,7 @@ GAMMA_S = cli_args.gamma_per_second
 DISCOUNT = GAMMA_S ** dt
 
 # Environment executable and output directory for the selected trajectories
-env_build = ENV_BUILDS[trajectories]
+env_build = cli_args.env_build or ENV_BUILDS[trajectories]
 out_dir = os.path.join(DEBUG_DIR, trajectories)
 os.makedirs(out_dir, exist_ok=True)
 
@@ -244,6 +283,7 @@ class LoopHandler(Node):
                 obs_pos=None,
                 n_obs=None,
                 dt_real=self.dt,
+                think_margin=THINK_MARGIN,
             )
             self.config = self.sim_env.config
             self.planner = Mcts(
@@ -274,6 +314,7 @@ class LoopHandler(Node):
                 obs_pos=None,
                 n_obs=None,
                 dt_real=self.dt,
+                think_margin=THINK_MARGIN,
             )
             self.config = self.sim_env.config
             self.planner = Mcts(
@@ -304,6 +345,7 @@ class LoopHandler(Node):
                 obs_pos=None,
                 n_obs=None,
                 dt_real=self.dt,
+                think_margin=THINK_MARGIN,
             )
             self.config = self.sim_env.config
             self.planner = RolloutPlanner(
@@ -331,8 +373,12 @@ class LoopHandler(Node):
         self.actions = []
         self.actions_executed = []
         self.sim_env.gym_env.max_eudist = dist_to_goal(self.s0.goal, self.s0.x[:2])
-        # t_timer is double the dt
-        self.t_timer = 0.2
+        # One cycle is: stop, sense and plan, then command the robot for ts. The
+        # robot is deliberately stopped while it thinks - that is what keeps the
+        # VO guarantee sound while the obstacles keep moving - so the period is
+        # ts plus the thinking time, not ts. In the paper configuration thinking
+        # is given a whole ts, hence the original hard-coded 2*dt.
+        self.t_timer = self.dt + THINK_MARGIN
         if algorithm != 'VO-PLANNER':
             self.timer = self.create_timer(self.t_timer, self.control_loop)
         else:
@@ -734,12 +780,28 @@ class LoopHandler(Node):
         # Append the current state to the planning states for tracking
         self.planning_states = np.vstack((self.planning_states, self.s0.x))
 
-        # Record the remaining time for planning
-        budget = self.dt - t1 - 0.005
+        # Time given to the planner. By default it is whatever is left of one ts
+        # after sensing, which is the paper's configuration; --plan-budget sets
+        # it directly, which is what decouples the cycle time from ts.
+        if PLAN_BUDGET is None:
+            budget = self.dt - t1 - SENSE_ALLOWANCE
+        else:
+            budget = PLAN_BUDGET
         self.times.append(budget)
 
-        # Plan the next action using the planner
-        action, info = self.planner.plan(self.s0, budget)
+        if budget <= 0:
+            # Sensing alone overran the step. Planning now would push the cycle
+            # past the period the velocity obstacles were sized for, so re-issue
+            # the last action, which VO already certified against the obstacles
+            # as they were one step ago, and give up the step.
+            self.logger.warn(
+                f"sensing took {t1 * 1e3:.1f} ms, leaving no planning budget; "
+                f"repeating the last action"
+            )
+            action, info = self.last_action, None
+        else:
+            # Plan the next action using the planner
+            action, info = self.planner.plan(self.s0, budget)
 
         # Append the planning information and action to their respective lists
         self.infos.append(info)
@@ -829,7 +891,7 @@ def save_data(loopHandler, exp_num):
     """
 
     # Define a suffix for file names based on the algorithm and experiment number
-    suffix = f'{algorithm}_{exp_num}'
+    suffix = f'{algorithm}_{exp_num}{cli_args.suffix}'
 
     # Check if the loopHandler's infos attribute contains valid data
     if None not in loopHandler.infos and len(loopHandler.infos) != 0:
@@ -930,6 +992,9 @@ def save_data(loopHandler, exp_num):
         "tCycleP99": t_cycle_p99,
         # Configuration, so a sweep's CSVs are self-describing.
         "ts": dt,
+        "planBudget": PLAN_BUDGET if PLAN_BUDGET is not None else np.nan,
+        "thinkMargin": THINK_MARGIN,
+        "horizonS": HORIZON_S,
         "radiusScale": RADIUS_SCALE,
         "maxObsVel": cli_args.max_obs_vel,
         "explorationC": EXPLORATION_C,
@@ -982,7 +1047,8 @@ def main(args=None):
         os.killpg(os.getpgid(process.pid), signal.SIGTERM)
         save_data(loopHandler, exp_num)
         if not cli_args.no_plots:
-            debug_plots_and_animations(loopHandler, exp_num, algorithm=algorithm, out_dir=out_dir)
+            debug_plots_and_animations(loopHandler, exp_num, algorithm=algorithm,
+                                       out_dir=out_dir, suffix_tag=cli_args.suffix)
         gc.collect()
 
 

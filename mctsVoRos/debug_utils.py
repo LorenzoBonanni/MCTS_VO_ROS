@@ -65,7 +65,8 @@ def create_tree_animation(goal, config, obs, values, trajectories, out_path):
     plt.close(fig)
 
 
-def debug_plots_and_animations(loopHandler, exp_num, algorithm, out_dir='debug'):
+def debug_plots_and_animations(loopHandler, exp_num, algorithm, out_dir='debug',
+                               suffix_tag=''):
     """
     Create the debug animations of a run.
 
@@ -75,9 +76,12 @@ def debug_plots_and_animations(loopHandler, exp_num, algorithm, out_dir='debug')
         algorithm (str): Name of the algorithm used for the run.
         out_dir (str): Output directory of the run (e.g. debug/sinusoidal).
                        Animations are written to <out_dir>/animations.
+        suffix_tag (str): Extra tag appended to the filenames, matching the one
+                       save_data used, so a sweep's animations do not overwrite
+                       each other.
     """
     print("Creating Gif...")
-    suffix = f'{algorithm}_{exp_num}'
+    suffix = f'{algorithm}_{exp_num}{suffix_tag}'
 
     # All the animations of the run live in <out_dir>/animations
     anim_dir = os.path.join(out_dir, 'animations')
