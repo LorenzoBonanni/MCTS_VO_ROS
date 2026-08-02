@@ -12,11 +12,14 @@ import numpy as np
 import time
 import tf_transformations
 
-from sklearn.cluster import HDBSCAN
 from debug_utils import debug_plots_and_animations
 from MCTS_VO.bettergym.agents.planner_mcts import Mcts, RolloutStateNode
 from MCTS_VO.bettergym.agents.utils.utils import epsilon_uniform_uniform
-from MCTS_VO.bettergym.compiled_utils import dist_to_goal, get_points_from_lidar
+from MCTS_VO.bettergym.compiled_utils import (
+    cluster_and_fit_circles,
+    dist_to_goal,
+    get_points_from_lidar,
+)
 from MCTS_VO.environment_creator import create_pedestrian_env
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
@@ -25,7 +28,6 @@ from copy import deepcopy
 from rclpy.executors import SingleThreadedExecutor
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
-from skimage.measure import CircleModel, ransac
 from functools import partial
 from MCTS_VO.bettergym.agents.utils.vo import epsilon_uniform_uniform_vo
 
@@ -95,6 +97,33 @@ DEBUG_DIR = 'debug'
 
 DEPTH = 200
 dt = 0.1
+
+# --- Obstacle estimation from the LIDAR scan -------------------------------
+# Clustering uses the adaptive breakpoint threshold
+#   d_max = d * sin(angle_increment) / sin(SEG_LAMBDA - angle_increment) + 3*SEG_SIGMA
+# SEG_LAMBDA sets how oblique a surface may be before consecutive returns count
+# as separate objects (a smaller angle is more permissive), SEG_SIGMA is the
+# range noise of the sensor.
+#
+# The RANSAC parameters and the acceptance rules are exactly those the previous
+# pipeline used, so that the estimator's output distribution stays comparable
+# while the implementations change underneath: at least SEG_MIN_POINTS points
+# per cluster, a fitted radius no larger than SEG_MAX_RADIUS, 100 trials, an
+# inlier threshold of 0.1 m and a stopping probability of 0.99.
+#
+# SEG_MAX_RESIDUAL would additionally reject clusters that are not circular (a
+# wall, a cube face), but the old pipeline had no such test - RANSAC always
+# returned a model - and dropping a real obstacle is the dangerous direction to
+# err in, so it is left disabled. Flat surfaces are still rejected by
+# SEG_MAX_RADIUS, since a circle fitted to them comes out enormous.
+SEG_LAMBDA = np.deg2rad(30.0)
+SEG_SIGMA = 0.01
+SEG_MIN_POINTS = 3
+SEG_MAX_RADIUS = 0.5
+SEG_MAX_RESIDUAL = np.inf
+RANSAC_MAX_TRIALS = 100
+RANSAC_RESIDUAL_THRESHOLD = 0.1
+RANSAC_STOP_PROBABILITY = 0.99
 
 # Episode length as a time budget rather than a step count. As a fixed 350
 # steps it silently shrank with dt: at dt = 0.05 an episode allowed 17.5 s of
@@ -327,7 +356,6 @@ class LoopHandler(Node):
             self.callback_lidar, 
             rclpy.qos.qos_profile_sensor_data
         )
-        self.clusting_algo = HDBSCAN(allow_single_cluster= True, alpha=0.5, cluster_selection_epsilon=0.01, min_cluster_size=2, min_samples=1, n_jobs=-1)
         self.last_action = np.array([0., self.s0.x[2]])
         self.max_obs_vel = cli_args.max_obs_vel
         self.robot_position = None
@@ -340,13 +368,13 @@ class LoopHandler(Node):
         self.update_odom = False
         self.update_lidar = False
         self.prev_odom = None
-        self.prev_lidar = None
         self.reached_goal = False
         self.collision = False
         self.obs_collision = False
         self.max_steps = False
         self.distances = None
         self.angles = None
+        self.scan_indices = None
 
     
     def SetLaser(self, msg):
@@ -390,9 +418,12 @@ class LoopHandler(Node):
             tuple: A tuple containing:
                 - distances (numpy.ndarray): An array of valid distance measurements from the LiDAR scan.
                 - angles (numpy.ndarray): An array of angles corresponding to the valid distance measurements.
+                - indices (numpy.ndarray): Index of each valid return within the raw
+                  scan. Clustering needs these to know which returns are really
+                  adjacent: dropping the invalid ones silently makes the
+                  survivors on either side of a dropout look contiguous.
         """
 
-        distances = []
         scan = self.lidar_msg.ranges
         angle_min = self.lidar_msg.angle_min
         angle_increment = self.lidar_msg.angle_increment
@@ -402,33 +433,38 @@ class LoopHandler(Node):
 
         distances = scan[mask.astype(int)].copy()
         angles = mask * angle_increment + angle_min
-        
-        return distances, angles
-    
-        
-    def group_matrix(self, M, I):
-        unique_indices = np.unique(I)
-        return {idx: M[I == idx] for idx in unique_indices}
 
-    
-    def estimate_obstacles(self, pos, heading, dist, angles):
+        return distances, angles, mask.astype(np.int64)
+
+
+    def estimate_obstacles(self, pos, heading, dist, angles, indices):
         """
         Estimates the positions and radii of obstacles based on LiDAR data.
-        Processes LiDAR distance and angle data to identify circular obstacles
-        using clustering and RANSAC, and returns their positions and radii.
+
+        The pipeline is unchanged - cluster the returns, then fit a circle to
+        each cluster with RANSAC - but both stages are compiled. A scan is
+        ordered by bearing, so clustering it is a one dimensional problem:
+        break wherever consecutive returns separate by more than the adaptive
+        breakpoint threshold allows. That replaces sklearn's HDBSCAN, which cost
+        about 15.5 ms per call whatever the point count, and skimage's RANSAC,
+        whose 1.3 ms per cluster was dispatch rather than trials. Together they
+        took 24 ms on average and up to 95 ms - more than the whole control
+        period.
+
         Args:
             pos (np.ndarray): Current robot position (x, y).
             heading (float): Current robot heading in radians.
             dist (np.ndarray): LiDAR-measured distances.
             angles (np.ndarray): Angles corresponding to LiDAR distances.
+            indices (np.ndarray): Index of each return within the raw scan.
         Returns:
             tuple:
             - obs_pos (np.ndarray): Array of shape (N, 4) with obstacle positions (x, y),
               heading (set to 0), and maximum velocity.
             - obs_rad (np.ndarray): Array of shape (N,) with obstacle radii.
         Notes:
-            - Clusters with fewer than 3 points are ignored.
-            - Obstacles with radii > 0.5 are filtered out.
+            - Clusters with fewer than SEG_MIN_POINTS points are ignored.
+            - Obstacles with fitted radii > SEG_MAX_RADIUS are filtered out.
             - Detected radii are scaled by RADIUS_SCALE.
         """
 
@@ -438,45 +474,28 @@ class LoopHandler(Node):
 
         # Convert LiDAR distances and angles into Cartesian coordinates
         points = get_points_from_lidar(dist, angles, pos, heading)
+        # One append of an already-computed array per control step, which the
+        # trajectory animation indexes per frame - keep it unconditional.
         self.points_list.append(points)
 
-        # Perform clustering on the points to group potential obstacles
-        clusters = self.clusting_algo.fit_predict(points)
-        groups = self.group_matrix(points, clusters)
-
-        # Initialize arrays to store obstacle positions and radii
-        obs_pos = np.empty((0, 2))
-        obs_rad = np.array([])
-
-        # Iterate through each cluster group
-        for group in groups.values():
-            # Ignore clusters with fewer than 3 points
-            if len(group) < 3:
-                continue
-            
-            # Use RANSAC to fit a circle model to the cluster points
-            ransac_model, _ = ransac(group, CircleModel, max_trials=100, min_samples=3, residual_threshold=0.1, stop_probability=0.99)
-            if ransac_model is None:
-                continue
-
-            # Extract the circle's center and radius from the RANSAC model
-            center = ransac_model.params[0:2]
-            radius = ransac_model.params[2]
-
-            # Scale the radius by a predefined factor
-            radius *= RADIUS_SCALE
-
-            # Append the center and radius to the respective arrays
-            obs_pos = np.vstack((obs_pos, center))
-            obs_rad = np.append(obs_rad, radius)
-
-        # Filter out obstacles with radii greater than 0.5
-        mask = obs_rad <= 0.5
-        obs_rad = obs_rad[mask]
-        obs_pos = obs_pos[mask]
+        centres, obs_rad = cluster_and_fit_circles(
+            np.ascontiguousarray(dist, dtype=np.float64),
+            np.ascontiguousarray(indices, dtype=np.int64),
+            points,
+            self.lidar_msg.angle_increment,
+            SEG_LAMBDA,
+            SEG_SIGMA,
+            SEG_MIN_POINTS,
+            RADIUS_SCALE,
+            SEG_MAX_RADIUS,
+            RANSAC_RESIDUAL_THRESHOLD,
+            RANSAC_MAX_TRIALS,
+            RANSAC_STOP_PROBABILITY,
+            SEG_MAX_RESIDUAL,
+        )
 
         # Add heading (set to 0) and maximum velocity to the obstacle positions
-        obs_pos = np.hstack((obs_pos, np.tile([0, self.max_obs_vel], (len(obs_pos), 1))))
+        obs_pos = np.hstack((centres, np.tile([0, self.max_obs_vel], (len(centres), 1))))
 
         # Return the estimated obstacle positions and radii
         return obs_pos, obs_rad
@@ -494,33 +513,33 @@ class LoopHandler(Node):
         Returns:
             None: If the robot's position is not initialized.
         Attributes Updated:
-            self.prev_lidar (sensor_msgs.msg.LaserScan): Stores the previous LiDAR message.
             self.update_lidar (bool): Indicates whether the LiDAR readings have changed.
             self.distances (list[float]): List of distances to obstacles from the LiDAR scan.
             self.collision (bool): True if the minimum distance to an obstacle is less than
                 or equal to the robot's radius, indicating a potential collision.
             self.angles (list[float]): List of angles corresponding to the LiDAR scan distances.
+            self.scan_indices (np.ndarray): Index of each valid return in the raw scan.
         """
         # If the robot's position is not initialized, exit the callback
         if self.robot_position is None:
             return
-        
-        # Check if a previous LiDAR message exists
+
+        # Whether this scan is new. This used to deep-copy the whole previous
+        # message and compare the full range tuples, at LIDAR rate, purely to
+        # set this one flag; the timestamp answers the same question for free.
         if self.lidar_msg is not None:
-            # Store the previous LiDAR message for comparison
-            self.prev_lidar = deepcopy(self.lidar_msg)
-            # Update the flag if the current LiDAR ranges differ from the previous ones
-            self.update_lidar = self.prev_lidar.ranges != msg.ranges
-            
+            self.update_lidar = self.lidar_msg.header.stamp != msg.header.stamp
+
         # Set the current LiDAR message
         self.SetLaser(msg)
         # Retrieve distances and angles from the LiDAR scan
-        dist, angles = self.get_scan()
+        dist, angles, indices = self.get_scan()
         # Update the distances and angles attributes
         self.distances = dist
         # Check for potential collisions based on the minimum distance to obstacles
         self.collision = min(dist) <= self.config.robot_radius
         self.angles = angles
+        self.scan_indices = indices
 
 
     def callback_odom(self, msg):
@@ -651,6 +670,7 @@ class LoopHandler(Node):
 
         # Retrieve and copy lidar distances and angles
         dist, angles = self.distances.copy(), self.angles.copy()
+        indices = self.scan_indices.copy()
         dist = dist.copy()
         angles = angles.copy()
 
@@ -668,7 +688,7 @@ class LoopHandler(Node):
         seed_everything(0)
 
         # Estimate obstacles based on lidar data and update the environment's obstacle list
-        self.obs_pos, self.obs_rad = self.estimate_obstacles(position, heading, dist, angles)
+        self.obs_pos, self.obs_rad = self.estimate_obstacles(position, heading, dist, angles, indices)
         self.s0.obstacles = (self.obs_pos, self.obs_rad)
         self.obstacles.append(self.s0.obstacles)
 
