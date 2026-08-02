@@ -228,6 +228,13 @@ class LoopHandler(Node):
         self.i = 0
         self.infos = []
         self.times = []
+        # Per-step breakdown of the plan-sense-control cycle, one dict per step:
+        # t_sense (obstacle estimation), t_plan (planner), t_budget (what the
+        # planner was given), n_sims, n_obs, and t_cycle, the wall-clock gap
+        # between two consecutive commands. `times` above keeps holding just the
+        # planning budget, so save_data and debug_utils are unaffected.
+        self.step_stats = []
+        self.prev_move_time = None
         self.actions = []
         self.actions_executed = []
         self.sim_env.gym_env.max_eudist = dist_to_goal(self.s0.goal, self.s0.x[:2])
@@ -641,10 +648,11 @@ class LoopHandler(Node):
         self.planning_states = np.vstack((self.planning_states, self.s0.x))
 
         # Record the remaining time for planning
-        self.times.append(self.dt - t1 - 0.005)
+        budget = self.dt - t1 - 0.005
+        self.times.append(budget)
 
         # Plan the next action using the planner
-        action, info = self.planner.plan(self.s0, self.dt - t1 - 0.005)
+        action, info = self.planner.plan(self.s0, budget)
 
         # Append the planning information and action to their respective lists
         self.infos.append(info)
@@ -662,6 +670,22 @@ class LoopHandler(Node):
 
         # Increment the step counter
         self.i += 1
+
+        # Record the cycle breakdown. t_cycle is measured command to command,
+        # so it is the period the robot actually ran at - which is not
+        # necessarily t_timer: control_loop returns early when no new sensor
+        # data has arrived, and then the whole tick is skipped.
+        now = time.time()
+        self.step_stats.append({
+            "t_sense": t1,
+            "t_plan": t2,
+            "t_budget": budget,
+            "n_sims": info["simulations"] if info is not None else np.nan,
+            "n_obs": len(self.obs_rad),
+            "t_cycle": np.nan if self.prev_move_time is None
+                       else now - self.prev_move_time,
+        })
+        self.prev_move_time = now
 
         # Execute the planned action by moving the robot
         self.move(self.s0.x, self.last_action, self.pub)
@@ -755,6 +779,22 @@ def save_data(loopHandler, exp_num):
     pickle.dump(loopHandler.obstacles_pred, open(f"{out_dir}/obsPred_{suffix}.pkl", 'wb'))
     pickle.dump(loopHandler.times, open(f"{out_dir}/times_{suffix}.pkl", 'wb'))
     pickle.dump(loopHandler.actions_executed, open(f"{out_dir}/actions_executed_{suffix}.pkl", 'wb'))
+    pickle.dump(loopHandler.step_stats, open(f"{out_dir}/step_stats_{suffix}.pkl", 'wb'))
+
+    # Per-phase timings, summarised into the CSV. The median says what a step
+    # normally costs, p99 says whether the budget is ever blown - and it is the
+    # p99, not the mean, that decides whether t_sense + t_plan < ts holds, which
+    # is the precondition for the VO guarantee.
+    def _phase(field):
+        vals = np.array([s[field] for s in loopHandler.step_stats], dtype=float)
+        vals = vals[~np.isnan(vals)]
+        if len(vals) == 0:
+            return np.nan, np.nan
+        return float(np.median(vals)), float(np.percentile(vals, 99))
+
+    t_sense_med, t_sense_p99 = _phase("t_sense")
+    t_plan_med, t_plan_p99 = _phase("t_plan")
+    t_cycle_med, t_cycle_p99 = _phase("t_cycle")
 
     # Calculate normalized distances to the goal
     max_eudist = loopHandler.sim_env.gym_env.max_eudist
@@ -794,6 +834,24 @@ def save_data(loopHandler, exp_num):
         "meanRolloutDepth": np.mean(rollout_depths) if rollout_depths else np.nan,
         "maxTotalDepth": np.max(total_depths) if total_depths else np.nan,
         "meanTotalDepth": np.mean(total_depths) if total_depths else np.nan,
+        # Per-phase timings, in seconds.
+        "tSenseMed": t_sense_med,
+        "tSenseP99": t_sense_p99,
+        "tPlanMed": t_plan_med,
+        "tPlanP99": t_plan_p99,
+        "tCycleMed": t_cycle_med,
+        "tCycleP99": t_cycle_p99,
+        # Configuration, so a sweep's CSVs are self-describing. Looked up
+        # defensively: this instrumentation is meant to sit at the *bottom* of
+        # the bug-fix sequence, where --max-obs-vel, --exploration-c and
+        # --gamma-per-second do not exist yet. A knob that has not been
+        # introduced must leave a blank column, not kill the run in save_data
+        # after the episode has already finished.
+        "ts": dt,
+        "radiusScale": globals().get("RADIUS_SCALE", np.nan),
+        "maxObsVel": getattr(cli_args, "max_obs_vel", np.nan),
+        "explorationC": globals().get("EXPLORATION_C", np.nan),
+        "gammaPerSecond": globals().get("GAMMA_S", np.nan),
     }
 
     # Save the results to a CSV file for analysis
