@@ -664,17 +664,23 @@ def do_plot(args, runs):
         warn(f"{len(ordered)} animations, roughly {secs / 60:.0f} min; "
              f"--limit caps it and Ctrl-C is safe (stills are already written)")
 
-    for i, r in enumerate(ordered, 1):
-        outcome = outcome_of(r)
-        d = plot_dir(args.outdir, r, outcome)
+    # Two passes, not one interleaved pass: the stills take seconds for a whole
+    # campaign and the animations take tens of minutes, so finishing every still
+    # first means interrupting the slow half still leaves a complete set.
+    stems = []
+    for r in ordered:
+        d = plot_dir(args.outdir, r, outcome_of(r))
         os.makedirs(d, exist_ok=True)
         stem = os.path.join(d, f"{r.algorithm}_{r.exp_num}{r.suffix}")
+        stems.append((r, d, stem))
         if plot_run(r, goal, stem + ".png"):
             written[d] += 1
-        if args.anim:
-            # Progress matters here: a full campaign is hours, and a silent
-            # process for that long is indistinguishable from a hung one.
-            print(f"  [{i}/{len(ordered)}] animating "
+
+    if args.anim:
+        for i, (r, d, stem) in enumerate(stems, 1):
+            # Progress matters here: a silent process for half an hour is
+            # indistinguishable from a hung one.
+            print(f"  [{i}/{len(stems)}] animating "
                   f"{r.algorithm}_{r.exp_num}{r.suffix} ({r.trajectories})...",
                   flush=True)
             if plot_run(r, goal, stem + ".gif", animate=True, fps=args.fps):
