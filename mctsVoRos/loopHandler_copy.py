@@ -67,6 +67,13 @@ parser.add_argument('--radius-scale', default=1.8, type=float,
                          'compensating for a front-facing arc under-estimating '
                          'the true radius. Too large and VO prunes away every '
                          'forward heading, leaving the robot stopped.')
+parser.add_argument('--rollout-collision', default='check', type=str,
+                    choices=['check', 'none'],
+                    help="Whether a rollout terminates on collision. 'check' "
+                         'reproduces step_check_coll (an obstacle centre within '
+                         "robot_radius ends the rollout with -100); 'none' "
+                         'reproduces step_no_check_coll, leaving collision '
+                         'avoidance entirely to VO pruning in the tree.')
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
@@ -97,6 +104,7 @@ algorithm = cli_args.algorithm
 trajectories = cli_args.trajectories
 EXPLORATION_C = cli_args.exploration_c
 RADIUS_SCALE = cli_args.radius_scale
+ROLLOUT_COLLISION_CHECK = cli_args.rollout_collision == 'check'
 
 # The discount is specified per second and converted to per step, so that the
 # effective horizon is a property of the problem rather than of the control
@@ -210,7 +218,10 @@ class LoopHandler(Node):
                     eps=0.4
                 ),
                 discount=DISCOUNT,
-                logger=self.logger
+                logger=self.logger,
+                # must match the eps of rollout_policy above
+                rollout_eps=0.4,
+                rollout_collision_check=ROLLOUT_COLLISION_CHECK,
             )
         elif algorithm == 'VO-TREE':
             _, self.sim_env = create_pedestrian_env(
@@ -236,7 +247,10 @@ class LoopHandler(Node):
                     eps=0.2
                 ),
                 discount=DISCOUNT,
-                logger=self.logger
+                logger=self.logger,
+                # must match the eps of rollout_policy above
+                rollout_eps=0.2,
+                rollout_collision_check=ROLLOUT_COLLISION_CHECK,
             )
         elif algorithm == 'VO-PLANNER':
             _, self.sim_env = create_pedestrian_env(
