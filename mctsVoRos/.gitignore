@@ -173,5 +173,4 @@ plots/
 # otherwise turn every experiment batch into a pile of untracked noise.
 debug_archive/
 debug_plots/
-debug_summary.csv
-debug_runs.csv
+analysis/
