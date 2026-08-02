@@ -407,10 +407,17 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
                       f"steps={fmt(r.get('nSteps'), '.0f'):>5} "
                       f"undisc={fmt(r.get('undiscountedReturn'))}")
 
+    def _prepare(path):
+        d = os.path.dirname(os.path.abspath(path))
+        if d:
+            os.makedirs(d, exist_ok=True)
+
     if csv_out:
+        _prepare(csv_out)
         pd.DataFrame(wide).to_csv(csv_out, index=False)
         print(f"\nwrote {csv_out}  ({len(wide)} groups x {len(wide[0]) if wide else 0} columns)")
     if runs_csv_out:
+        _prepare(runs_csv_out)
         pd.DataFrame([{
             "source": r.source, "trajectories": r.trajectories,
             "algorithm": r.algorithm, "suffix": r.suffix, "expNum": int(r.exp_num),
@@ -821,9 +828,15 @@ def main():
                    help="where snapshots live (default: %(default)s)")
     # Written every run rather than on request: the tables scroll away, and the
     # point of the summary is not having to re-run it to look something up.
-    p.add_argument("--csv", default=os.path.join(here, "debug_summary.csv"),
+    #
+    # They live in their own directory rather than the package root because they
+    # are generated, and rather than in debug/ or debug_archive/ because they
+    # summarise across both - a snapshot clears debug/, and these must outlive
+    # that.
+    analysis = os.path.join(here, "analysis")
+    p.add_argument("--csv", default=os.path.join(analysis, "summary.csv"),
                    help="one row per group (default: %(default)s)")
-    p.add_argument("--runs-csv", default=os.path.join(here, "debug_runs.csv"),
+    p.add_argument("--runs-csv", default=os.path.join(analysis, "runs.csv"),
                    help="one row per individual run (default: %(default)s)")
     p.add_argument("--no-csv", action="store_true",
                    help="print the tables only, write nothing")

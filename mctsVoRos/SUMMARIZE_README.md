@@ -25,14 +25,18 @@ CSVs** so you never have to re-run it just to look something up:
 
 | file | contents |
 |---|---|
-| `debug_summary.csv` | one row per group — the tables above, in one wide row each |
-| `debug_runs.csv` | one row per individual run, including its outcome and smoothness |
+| `analysis/summary.csv` | one row per group — the tables above, in one wide row each |
+| `analysis/runs.csv` | one row per individual run, including its outcome and smoothness |
+
+They sit in `analysis/` rather than beside the script because they are generated, and rather than
+in `debug/` or `debug_archive/` because they summarise across both — a snapshot clears `debug/`,
+and these have to outlive that.
 
 Open them in a spreadsheet, or:
 
 ```python
 import pandas as pd
-d = pd.read_csv("debug_runs.csv")
+d = pd.read_csv("analysis/runs.csv")
 d.groupby(["algorithm", "trajectories"]).outcome.value_counts().unstack(fill_value=0)
 ```
 
@@ -50,7 +54,7 @@ python3 summarize_debug.py --runs
 
 # write the CSVs somewhere else, or not at all
 python3 summarize_debug.py --csv mine.csv --runs-csv mine_runs.csv
-python3 summarize_debug.py --no-csv
+python3 summarize_debug.py --no-csv          # print the tables only
 ```
 
 ## Comparing the bug fixes step by step
@@ -314,8 +318,8 @@ snapshot command exists.
 | `debug/` | live results, gitignored |
 | `debug_archive/<label>/` | snapshots: data + `plots/` (untracked) |
 | `debug_plots/<algo>/<env>/<outcome>/` | output of `plot` (untracked) |
-| `debug_summary.csv` | one row per group, rewritten every run (untracked) |
-| `debug_runs.csv` | one row per run, rewritten every run (untracked) |
+| `analysis/summary.csv` | one row per group, rewritten every run (untracked) |
+| `analysis/runs.csv` | one row per run, rewritten every run (untracked) |
 | `~/.local/share/Trash/files/debug/` | earlier experiments: RADIUS_SCALE sweep, 5/10/20/25 Hz sweep |
 
 `--dir` reads any of these in place. Nothing is ever moved or deleted; `snapshot` copies.
