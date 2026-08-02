@@ -42,9 +42,19 @@ parser.add_argument('--trajectories', default='sinusoidal', type=str,
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
-    'sinusoidal': '../env_build/sin_env/env.x86_64',
-    'intention': '../env_build/int_env/env.x86_64',
+    'sinusoidal': '../env_build/sin_env_50hz/env.x86_64',
+    'intention': '../env_build/int_env_50hz/env.x86_64',
 }
+
+# Launched headless. The Unity scene asks for 50 Hz on /scan and /odom, but
+# LaserScanner2D triggers from a coroutine and scans in Update(), both of which
+# run once per frame, so the publish rate is clamped to the frame rate and
+# rounded down to a multiple of it. At the project's default quality level
+# (5, Ultra, with vSync) that frame rate is ~17 FPS, which yields 16.8 Hz;
+# headless it is ~195 FPS, which yields the configured 49.7 Hz. Since
+# control_loop skips a tick whenever no new scan has arrived, that rate is a
+# hard floor on the cycle time: cycle >= 2/rate.
+ENV_RENDER_ARGS = ['-batchmode', '-nographics']
 
 # Root directory of every artifact produced by the experiments
 DEBUG_DIR = 'debug'
@@ -820,7 +830,7 @@ def main(args=None):
     print(f"Experiment: {exp_num} | Algorithm: {algorithm} | Trajectories: {trajectories}")
     print(f"Environment: {env_build} | Output directory: {out_dir}")
     loopHandler = LoopHandler(dt)
-    process = subprocess.Popen([env_build], preexec_fn=os.setpgrp)
+    process = subprocess.Popen([env_build] + ENV_RENDER_ARGS, preexec_fn=os.setpgrp)
     time.sleep(2)
     try:
         executor = SingleThreadedExecutor()
