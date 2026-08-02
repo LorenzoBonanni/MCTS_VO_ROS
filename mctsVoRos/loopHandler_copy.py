@@ -109,8 +109,15 @@ class LoopHandler(Node):
         self.logger = self.get_logger()
 
         self.pub = self.create_publisher(Twist, 'cmd_vel', 1)
-        self.goal = np.array([-3.26, -1.61])
-        
+        # Position of the `Goal` object in the Unity scene, converted with the
+        # frame mapping below. It used to read [-3.26, -1.61], which is 0.95 m
+        # away from the marker the scene actually draws: the robot was steering
+        # at a point no one could see, and "goal reached" was judged against it.
+        # Verified by applying the same conversion to the robot's spawn
+        # transform, unity (1.136, 0, 0.490) -> (0.490, -1.136), which matches
+        # the first odometry reading exactly.
+        self.goal = np.array([-2.783, -0.720])
+
         self.i = 0
         
         # X python = Unity Z
