@@ -39,6 +39,14 @@ parser.add_argument('--trajectories', default='sinusoidal', type=str,
                     help='Type of obstacle trajectories, i.e. which Unity '
                          'environment to launch. Also determines the output '
                          'directory (debug/<trajectories>).')
+parser.add_argument('--max-obs-vel', default=0.15, type=float,
+                    help='Maximum obstacle speed the velocity obstacles are '
+                         'sized for. This MUST be >= the fastest obstacle in '
+                         'the scene or the safety guarantee does not hold: '
+                         'move_1.cs and move_2.cs (Obstacle_7/8_MOVING in the '
+                         'sinusoidal scene) draw Random.Range(0.10, 0.15), so '
+                         'the true maximum is 0.15 m/s while the code assumed '
+                         '0.10.')
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
@@ -256,7 +264,7 @@ class LoopHandler(Node):
         )
         self.clusting_algo = HDBSCAN(allow_single_cluster= True, alpha=0.5, cluster_selection_epsilon=0.01, min_cluster_size=2, min_samples=1, n_jobs=-1)
         self.last_action = np.array([0., self.s0.x[2]])
-        self.max_obs_vel = 0.1
+        self.max_obs_vel = cli_args.max_obs_vel
         self.robot_position = None
         self.heading = None
         self.obs_rad = None
