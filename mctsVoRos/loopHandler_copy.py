@@ -47,6 +47,13 @@ parser.add_argument('--max-obs-vel', default=0.15, type=float,
                          'sinusoidal scene) draw Random.Range(0.10, 0.15), so '
                          'the true maximum is 0.15 m/s while the code assumed '
                          '0.10.')
+parser.add_argument('--exploration-c', default=1.0, type=float,
+                    help='UCB exploration constant. The paper uses 10, but the '
+                         'Q-values of the root actions span only ~0.06, while '
+                         'the UCB bonus at c=10 and ~20 visits is ~5.3 - the '
+                         'bonus swamps the signal and action selection becomes '
+                         'close to random. Values around 1 or below make it '
+                         'discriminate.')
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
@@ -81,6 +88,7 @@ cli_args = parser.parse_args()
 exp_num = cli_args.exp_num
 algorithm = cli_args.algorithm
 trajectories = cli_args.trajectories
+EXPLORATION_C = cli_args.exploration_c
 
 # Environment executable and output directory for the selected trajectories
 env_build = ENV_BUILDS[trajectories]
@@ -179,7 +187,7 @@ class LoopHandler(Node):
             self.config = self.sim_env.config
             self.planner = Mcts(
                 num_sim=100,
-                c=10,
+                c=EXPLORATION_C,
                 environment=self.sim_env,
                 computational_budget=DEPTH,
                 rollout_policy=partial(
@@ -205,7 +213,7 @@ class LoopHandler(Node):
             self.config = self.sim_env.config
             self.planner = Mcts(
                 num_sim=100,
-                c=10,
+                c=EXPLORATION_C,
                 environment=self.sim_env,
                 computational_budget=DEPTH,
                 rollout_policy=partial(
