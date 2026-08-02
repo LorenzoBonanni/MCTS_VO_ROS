@@ -122,15 +122,23 @@ class LoopHandler(Node):
         
         # X python = Unity Z
         # Y python = Unity -X
+        #
+        # The six static obstacles of the scene, read off the transforms in
+        # Assets/Scenes/turtlebot3_COPY.unity and converted with the mapping
+        # above. Radius 0.100 m is their sphere scale of 0.2 in the scene.
+        #
+        # The four Obstacle_*_MOVING spheres are deliberately not listed: they
+        # drift at up to 0.15 m/s, so a fixed position would be ground truth
+        # only at t = 0. Nothing here reaches the planner, which navigates on
+        # the LIDAR estimates; these serve the debug plots and the warm-up
+        # state alone.
         self.gt_obs_pos = np.array([
-            [-2.221, -2.04, 0.0, 0.0],
-            [-0.92, -1.651, 0.0, 0.0],
-            [-1.127, -0.833, 0.0, 0.0],
-            [-1.739,-1.395, 0.0, 0.0],
-            [-2.003,-0.696, 0.0, 0.0],
-            # [-2.357,-1.027, 0.0, 0.0],
-            [-1.127,-0.146, 0.0, 0.0],
-            
+            [-0.399,  0.420, 0.0, 0.0],
+            [-1.542, -1.790, 0.0, 0.0],
+            [-1.539,  0.360, 0.0, 0.0],
+            [-2.640, -1.310, 0.0, 0.0],
+            [-0.317, -1.820, 0.0, 0.0],
+            [-3.020,  0.363, 0.0, 0.0],
         ])
         self.gt_obs_rad = np.array([0.100 for _ in range(len(self.gt_obs_pos))])
         
