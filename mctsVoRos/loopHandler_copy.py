@@ -114,6 +114,12 @@ parser.add_argument('--gamma-per-second', default=0.81, type=float,
                          'time needed to reach the goal, so the first action '
                          'barely changes the return. 0.81 is a ~5 s horizon. '
                          'Pass 0.34867844 to reproduce the paper exactly.')
+parser.add_argument('--radius-scale', default=1.8, type=float,
+                    help='Factor applied to every RANSAC-fitted obstacle '
+                         'radius before it reaches the velocity obstacles, '
+                         'compensating for a front-facing arc under-estimating '
+                         'the true radius. Too large and VO prunes away every '
+                         'forward heading, leaving the robot stopped.')
 
 # Unity builds, per obstacle-trajectory type. Three variants exist because the
 # obstacle-motion fix changes the environment rather than the planner, so runs
@@ -180,7 +186,6 @@ SCENE_MAX_OBS_VEL = {
 # Root directory of every artifact produced by the experiments
 DEBUG_DIR = 'debug'
 
-RADIUS_SCALE = 3
 DEPTH = 200
 dt = 0.1
 
@@ -201,6 +206,7 @@ algorithm = cli_args.algorithm
 trajectories = cli_args.trajectories
 EXPLORATION_C = cli_args.exploration_c
 ENV_RENDER_ARGS = ENV_RENDER_ARGS_BY_MODE[cli_args.env_render]
+RADIUS_SCALE = cli_args.radius_scale
 
 # Formatted here rather than at the call site so the number the simulator is
 # given is the number recorded in the CSV. ':g' keeps a '.' decimal separator
