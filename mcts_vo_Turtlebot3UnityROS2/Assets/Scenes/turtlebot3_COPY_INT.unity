@@ -528,7 +528,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   NodeName: single_transform_publisher
-  TfPublishingFrequency: 10
+  TfPublishingFrequency: 50
   ParentFrame: {fileID: 578576699}
   ChildFrame: {fileID: 807042946}
 --- !u!114 &578576701
@@ -570,7 +570,7 @@ MonoBehaviour:
   NodeName: joint_states_node
   topicName: joint_states
   frame_id: 
-  ScanningFrequency: 10
+  ScanningFrequency: 50
   jointForJointState:
   - wheel_right_joint
   - wheel_left_joint
@@ -1302,7 +1302,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8753101125198676617, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: ScanningFrequency
-      value: 10
+      value: 50
       objectReference: {fileID: 0}
     - target: {fileID: 8753101125338730101, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: BaseRigidbody

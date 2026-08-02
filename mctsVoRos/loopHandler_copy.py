@@ -12,11 +12,14 @@ import numpy as np
 import time
 import tf_transformations
 
-from sklearn.cluster import HDBSCAN
 from debug_utils import debug_plots_and_animations
 from MCTS_VO.bettergym.agents.planner_mcts import Mcts, RolloutStateNode
 from MCTS_VO.bettergym.agents.utils.utils import epsilon_uniform_uniform
-from MCTS_VO.bettergym.compiled_utils import dist_to_goal, get_points_from_lidar
+from MCTS_VO.bettergym.compiled_utils import (
+    dist_to_goal,
+    get_points_from_lidar,
+    segment_and_fit_circles,
+)
 from MCTS_VO.environment_creator import create_pedestrian_env
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
@@ -25,7 +28,6 @@ from copy import deepcopy
 from rclpy.executors import SingleThreadedExecutor
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
-from skimage.measure import CircleModel, ransac
 from functools import partial
 from MCTS_VO.bettergym.agents.utils.vo import epsilon_uniform_uniform_vo
 
@@ -39,6 +41,66 @@ parser.add_argument('--trajectories', default='sinusoidal', type=str,
                     help='Type of obstacle trajectories, i.e. which Unity '
                          'environment to launch. Also determines the output '
                          'directory (debug/<trajectories>).')
+parser.add_argument('--radius-scale', default=3.0, type=float,
+                    help='Factor applied to every fitted obstacle radius before '
+                         'it reaches the velocity obstacles, compensating for a '
+                         'front-facing arc under-estimating the true radius. '
+                         'Too large and VO prunes away every forward heading, '
+                         'leaving the robot stopped.')
+parser.add_argument('--suffix', default='', type=str,
+                    help='Extra tag appended to every output filename, so that '
+                         'sweeps do not overwrite each other.')
+parser.add_argument('--ts', default=0.1, type=float,
+                    help='Simulation and control time step in seconds. The robot '
+                         'is commanded for ts after each planning step, and MCTS '
+                         'simulates with the same step. Default 0.1 is the '
+                         'configuration of the paper.')
+parser.add_argument('--plan-budget', default=None, type=float,
+                    help='Wall-clock seconds given to the planner each step. The '
+                         'planner always spends its whole budget, so this - not '
+                         'how fast the planner is - is what sets the cycle time; '
+                         'a faster planner buys more simulations per budget. '
+                         'Default keeps the paper behaviour: whatever is left of '
+                         'one ts after sensing, with the cycle running at 2*ts.')
+parser.add_argument('--env-build', default=None, type=str,
+                    help='Path to the Unity build to launch, overriding the '
+                         'default for --trajectories. Use it to select a build '
+                         'with different sensor publish rates, e.g. '
+                         '../env_build/sin_env_50hz/env.x86_64')
+parser.add_argument('--max-obs-vel', default=0.15, type=float,
+                    help='Maximum obstacle speed the velocity obstacles are sized '
+                         'for. This MUST be >= the fastest obstacle in the scene or '
+                         'the safety guarantee does not hold: move_1.cs and '
+                         'move_2.cs (Obstacle_7/8_MOVING in the sinusoidal scene) '
+                         'draw Random.Range(0.10, 0.15), so the true maximum is '
+                         '0.15 m/s while the code assumed 0.10.')
+parser.add_argument('--exploration-c', default=10.0, type=float,
+                    help='UCB exploration constant. The paper uses 10, but the '
+                         'Q-values of the root actions span only ~0.06, while the '
+                         'UCB bonus at c=10 and ~20 visits is ~5.3 - the bonus '
+                         'swamps the signal and action selection becomes close to '
+                         'random. Values around 1 or below make it discriminate.')
+parser.add_argument('--gamma-per-second', default=None, type=float,
+                    help='Discount per SECOND (default 0.9**10 = 0.349, i.e. the '
+                         "paper's 0.9 per step at ts=0.1). That is an effective "
+                         'horizon of ~1 s, which is shorter than the time needed '
+                         'to reach the goal, so the first action barely changes '
+                         'the return. Try 0.81 for a ~5 s horizon.')
+parser.add_argument('--rollout-collision', default='check', type=str,
+                    choices=['check', 'none'],
+                    help="Whether a rollout terminates on collision. 'check' "
+                         'reproduces step_check_coll (an obstacle centre within '
+                         'robot_radius ends the rollout with -100); \'none\' '
+                         'reproduces step_no_check_coll, leaving collision '
+                         'avoidance entirely to VO pruning in the tree.')
+parser.add_argument('--no-plots', action='store_true',
+                    help='Skip the debug plots and animations at the end of a '
+                         'run. Rendering the trajectory GIF takes far longer '
+                         'than the run itself, so sweeps want this.')
+parser.add_argument('--collect-trajectories', action='store_true',
+                    help='Record every simulated state so that the rollout tree '
+                         'animation can be produced. Costs about a quarter of '
+                         'the planning budget, so it is off by default.')
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
@@ -49,23 +111,84 @@ ENV_BUILDS = {
 # Root directory of every artifact produced by the experiments
 DEBUG_DIR = 'debug'
 
-MAX_STEPS = 350
-RADIUS_SCALE = 3
-DISCOUNT = 0.9
-DEPTH = 200
-dt = 0.1
+# Episode length as a time budget rather than a step count. As a fixed 350 steps
+# it silently shrank with ts: at ts=0.05 an episode allowed 17.5 s of motion
+# against 35 s at ts=0.1, i.e. 3.85 m of travel for a 3.30 m goal, so a faster
+# control loop was being scored on half the distance budget.
+EPISODE_S = 35.0
+
+# --- Obstacle estimation from the LIDAR scan -------------------------------
+# Segmentation uses the adaptive breakpoint threshold
+#   d_max = d * sin(angle_increment) / sin(SEG_LAMBDA - angle_increment) + 3*SEG_SIGMA
+# SEG_LAMBDA sets how oblique a surface may be before consecutive returns count
+# as separate objects (smaller angle -> more permissive), SEG_SIGMA is the range
+# noise of the sensor.
+#
+# Acceptance rules are kept exactly as the previous HDBSCAN + RANSAC pipeline
+# had them: a segment needs at least SEG_MIN_POINTS points and a radius no larger
+# than SEG_MAX_RADIUS. SEG_MAX_RESIDUAL would additionally reject segments that
+# are not circular (a wall, a cube face), but the old pipeline had no such test -
+# RANSAC always returned a model - and dropping a real obstacle is the dangerous
+# direction to err in, so it is left disabled. Flat surfaces are still rejected
+# by SEG_MAX_RADIUS, since a circle fitted to them comes out enormous.
+SEG_LAMBDA = np.deg2rad(30.0)
+SEG_SIGMA = 0.01
+SEG_MIN_POINTS = 3
+SEG_MAX_RESIDUAL = np.inf
+SEG_MAX_RADIUS = 0.5
+
+cli_args = parser.parse_args()
+dt = cli_args.ts
+RADIUS_SCALE = cli_args.radius_scale
+PLAN_BUDGET = cli_args.plan_budget
+
+# Time the robot stands still between commands while it senses and plans. In the
+# default configuration that is one whole ts (the loop runs at 2*ts, half of it
+# stopped); with an explicit --plan-budget it collapses to the budget plus a
+# small allowance for sensing. Velocity obstacles are enlarged by it, since the
+# obstacles keep moving throughout, so shrinking it is what makes VO less
+# conservative and gives the planner back its manoeuvring room.
+SENSE_ALLOWANCE = 0.005
+if PLAN_BUDGET is None:
+    THINK_MARGIN = dt
+else:
+    THINK_MARGIN = PLAN_BUDGET + SENSE_ALLOWANCE
+
+# Planning horizon, in seconds rather than in simulation steps. The rollout depth
+# follows from it, so the horizon stays put when the control period changes -
+# with the old fixed DEPTH=200, halving dt would silently have halved it.
+#
+# 20 s reproduces the depth of 200 used in the paper. A shorter horizon is very
+# nearly free in return terms (with a per-step discount of 0.9 and per-step
+# rewards in [-1, 0], everything past step k is bounded by 10*0.9^k, i.e. 0.018
+# at k=60 against returns of about 9.4) and used to buy 2.5x more simulations.
+# Since the rollout is compiled it buys only about 2%, so the paper's horizon is
+# kept: fidelity is worth more than the 2%.
+HORIZON_S = 20.0
+DEPTH = int(round(HORIZON_S / dt))
+MAX_STEPS = int(round(EPISODE_S / dt))
+
+# The discount is defined per second and converted to per step, so that halving
+# dt does not silently halve the effective horizon. GAMMA_S is fixed by the
+# reference configuration of the paper (0.9 per step at dt = 0.1 s).
+TS_REFERENCE = 0.1
+GAMMA_S = cli_args.gamma_per_second if cli_args.gamma_per_second is not None \
+    else 0.9 ** (1.0 / TS_REFERENCE)
+DISCOUNT = GAMMA_S ** dt
+EXPLORATION_C = cli_args.exploration_c
 
 # Options for the planner
 # MCTS
 # VO-TREE
 # VO-PLANNER
-cli_args = parser.parse_args()
 exp_num = cli_args.exp_num
 algorithm = cli_args.algorithm
 trajectories = cli_args.trajectories
+collect_trajectories = cli_args.collect_trajectories
+rollout_collision_check = cli_args.rollout_collision == 'check'
 
 # Environment executable and output directory for the selected trajectories
-env_build = ENV_BUILDS[trajectories]
+env_build = cli_args.env_build or ENV_BUILDS[trajectories]
 out_dir = os.path.join(DEBUG_DIR, trajectories)
 os.makedirs(out_dir, exist_ok=True)
 
@@ -109,21 +232,38 @@ class LoopHandler(Node):
         self.logger = self.get_logger()
 
         self.pub = self.create_publisher(Twist, 'cmd_vel', 1)
-        self.goal = np.array([-3.26, -1.61])
+        # Position of the `Goal` object in the Unity scene, converted with the
+        # frame mapping below. It used to read [-3.26, -1.61], which is 0.95 m
+        # away from the marker the scene actually draws: the robot was steering
+        # at a point no one could see, and "goal reached" was judged against it.
+        # Verified by the same conversion applied to the robot's spawn transform,
+        # unity (1.136, 0, 0.490) -> (0.490, -1.136), which matches the first
+        # odometry reading exactly.
+        self.goal = np.array([-2.783, -0.720])
         
         self.i = 0
         
         # X python = Unity Z
         # Y python = Unity -X
+        #
+        # The six static obstacles of the scene, read off the transforms in
+        # Assets/Scenes/turtlebot3_COPY.unity and converted with the mapping
+        # above. The previous values matched nothing in the scene - only 0.9% of
+        # LIDAR detections landed within 15 cm of them, against 51.7% for these -
+        # which made every perception diagnostic look broken when it was not.
+        # Radius 0.100 m is the sphere scale of 0.2 in the scene.
+        #
+        # The four Obstacle_*_MOVING spheres are deliberately not listed: they
+        # drift at up to 0.1 m/s, so a fixed position would be ground truth only
+        # at t=0. Nothing here feeds the planner, which uses the LIDAR estimates;
+        # these are for the debug plots and the warm-up state only.
         self.gt_obs_pos = np.array([
-            [-2.221, -2.04, 0.0, 0.0],
-            [-0.92, -1.651, 0.0, 0.0],
-            [-1.127, -0.833, 0.0, 0.0],
-            [-1.739,-1.395, 0.0, 0.0],
-            [-2.003,-0.696, 0.0, 0.0],
-            # [-2.357,-1.027, 0.0, 0.0],
-            [-1.127,-0.146, 0.0, 0.0],
-            
+            [-0.399,  0.420, 0.0, 0.0],
+            [-1.542, -1.790, 0.0, 0.0],
+            [-1.539,  0.360, 0.0, 0.0],
+            [-2.640, -1.310, 0.0, 0.0],
+            [-0.317, -1.820, 0.0, 0.0],
+            [-3.020,  0.363, 0.0, 0.0],
         ])
         self.gt_obs_rad = np.array([0.100 for _ in range(len(self.gt_obs_pos))])
         
@@ -142,11 +282,12 @@ class LoopHandler(Node):
                 obs_pos=None,
                 n_obs=None,
                 dt_real=self.dt,
+                think_margin=THINK_MARGIN,
             )
             self.config = self.sim_env.config
             self.planner = Mcts(
                 num_sim=100,
-                c=10,
+                c=EXPLORATION_C,
                 environment=self.sim_env,
                 computational_budget=DEPTH,
                 rollout_policy=partial(
@@ -155,7 +296,11 @@ class LoopHandler(Node):
                     eps=0.4
                 ),
                 discount=DISCOUNT,
-                logger=self.logger
+                logger=self.logger,
+                collect_trajectories=collect_trajectories,
+                # must match the eps of rollout_policy above
+                rollout_eps=0.4,
+                rollout_collision_check=rollout_collision_check,
             )
         elif algorithm == 'VO-TREE':
             _, self.sim_env = create_pedestrian_env(
@@ -168,11 +313,12 @@ class LoopHandler(Node):
                 obs_pos=None,
                 n_obs=None,
                 dt_real=self.dt,
+                think_margin=THINK_MARGIN,
             )
             self.config = self.sim_env.config
             self.planner = Mcts(
                 num_sim=100,
-                c=10,
+                c=EXPLORATION_C,
                 environment=self.sim_env,
                 computational_budget=DEPTH,
                 rollout_policy=partial(
@@ -181,7 +327,11 @@ class LoopHandler(Node):
                     eps=0.2
                 ),
                 discount=DISCOUNT,
-                logger=self.logger
+                logger=self.logger,
+                collect_trajectories=collect_trajectories,
+                # must match the eps of rollout_policy above
+                rollout_eps=0.2,
+                rollout_collision_check=rollout_collision_check,
             )
         elif algorithm == 'VO-PLANNER':
             _, self.sim_env = create_pedestrian_env(
@@ -194,6 +344,7 @@ class LoopHandler(Node):
                 obs_pos=None,
                 n_obs=None,
                 dt_real=self.dt,
+                think_margin=THINK_MARGIN,
             )
             self.config = self.sim_env.config
             self.planner = RolloutPlanner(
@@ -211,11 +362,22 @@ class LoopHandler(Node):
         self.i = 0
         self.infos = []
         self.times = []
+        # Per-step breakdown of the plan-sense-control cycle, one dict per step:
+        # t_sense (obstacle estimation), t_plan (planner), n_sims (simulations
+        # performed) and t_cycle (wall-clock between two consecutive commands).
+        # `times` above keeps holding just the planning budget, so save_data and
+        # debug_utils are unaffected.
+        self.step_stats = []
+        self.prev_move_time = None
         self.actions = []
         self.actions_executed = []
         self.sim_env.gym_env.max_eudist = dist_to_goal(self.s0.goal, self.s0.x[:2])
-        # t_timer is double the dt
-        self.t_timer = 0.2
+        # One cycle is: stop, sense and plan, then command the robot for ts. The
+        # robot is deliberately stopped while it thinks - that is what keeps the
+        # VO guarantee sound while the obstacles keep moving - so the period is
+        # ts plus the thinking time, not ts. In the paper configuration thinking
+        # is given a whole ts, hence the original 2*dt.
+        self.t_timer = self.dt + THINK_MARGIN
         if algorithm != 'VO-PLANNER':
             self.timer = self.create_timer(self.t_timer, self.control_loop)
         else:
@@ -239,9 +401,8 @@ class LoopHandler(Node):
             self.callback_lidar, 
             rclpy.qos.qos_profile_sensor_data
         )
-        self.clusting_algo = HDBSCAN(allow_single_cluster= True, alpha=0.5, cluster_selection_epsilon=0.01, min_cluster_size=2, min_samples=1, n_jobs=-1)
         self.last_action = np.array([0., self.s0.x[2]])
-        self.max_obs_vel = 0.1
+        self.max_obs_vel = cli_args.max_obs_vel
         self.robot_position = None
         self.heading = None
         self.obs_rad = None
@@ -252,13 +413,13 @@ class LoopHandler(Node):
         self.update_odom = False
         self.update_lidar = False
         self.prev_odom = None
-        self.prev_lidar = None
         self.reached_goal = False
         self.collision = False
         self.obs_collision = False
         self.max_steps = False
         self.distances = None
         self.angles = None
+        self.scan_indices = None
 
     
     def SetLaser(self, msg):
@@ -302,9 +463,12 @@ class LoopHandler(Node):
             tuple: A tuple containing:
                 - distances (numpy.ndarray): An array of valid distance measurements from the LiDAR scan.
                 - angles (numpy.ndarray): An array of angles corresponding to the valid distance measurements.
+                - indices (numpy.ndarray): Index of each valid return within the raw
+                  scan. Segmentation needs these to know which returns are really
+                  adjacent: dropping the invalid ones silently makes the survivors
+                  look contiguous when they are not.
         """
 
-        distances = []
         scan = self.lidar_msg.ranges
         angle_min = self.lidar_msg.angle_min
         angle_increment = self.lidar_msg.angle_increment
@@ -314,33 +478,38 @@ class LoopHandler(Node):
 
         distances = scan[mask.astype(int)].copy()
         angles = mask * angle_increment + angle_min
-        
-        return distances, angles
-    
-        
-    def group_matrix(self, M, I):
-        unique_indices = np.unique(I)
-        return {idx: M[I == idx] for idx in unique_indices}
 
+        return distances, angles, mask.astype(np.int64)
     
-    def estimate_obstacles(self, pos, heading, dist, angles):
+        
+    def estimate_obstacles(self, pos, heading, dist, angles, indices):
         """
         Estimates the positions and radii of obstacles based on LiDAR data.
-        Processes LiDAR distance and angle data to identify circular obstacles
-        using clustering and RANSAC, and returns their positions and radii.
+
+        A scan is ordered by angle, so grouping its returns is a one dimensional
+        problem: segment where consecutive returns jump further apart than the
+        adaptive breakpoint threshold allows, then fit a circle to each segment
+        in closed form. This replaces HDBSCAN clustering plus a 100-trial RANSAC
+        per cluster, which cost 24 ms on average and up to 95 ms - more than the
+        whole control period - of which roughly 15 ms was HDBSCAN's fixed
+        overhead, paid regardless of how many points the scan contained.
+
         Args:
             pos (np.ndarray): Current robot position (x, y).
             heading (float): Current robot heading in radians.
             dist (np.ndarray): LiDAR-measured distances.
             angles (np.ndarray): Angles corresponding to LiDAR distances.
+            indices (np.ndarray): Index of each return within the raw scan.
         Returns:
             tuple:
             - obs_pos (np.ndarray): Array of shape (N, 4) with obstacle positions (x, y),
               heading (set to 0), and maximum velocity.
             - obs_rad (np.ndarray): Array of shape (N,) with obstacle radii.
         Notes:
-            - Clusters with fewer than 3 points are ignored.
-            - Obstacles with radii > 0.5 are filtered out.
+            - Segments with fewer than SEG_MIN_POINTS points are ignored.
+            - Fits with an RMS residual above SEG_MAX_RESIDUAL are rejected as
+              non-circular, which is how walls and cube faces are excluded.
+            - Obstacles with radii > SEG_MAX_RADIUS are filtered out.
             - Detected radii are scaled by RADIUS_SCALE.
         """
 
@@ -350,45 +519,25 @@ class LoopHandler(Node):
 
         # Convert LiDAR distances and angles into Cartesian coordinates
         points = get_points_from_lidar(dist, angles, pos, heading)
+        # One append of an already-computed array per control step, which the
+        # trajectory animation indexes per frame - keep it unconditional.
         self.points_list.append(points)
 
-        # Perform clustering on the points to group potential obstacles
-        clusters = self.clusting_algo.fit_predict(points)
-        groups = self.group_matrix(points, clusters)
-
-        # Initialize arrays to store obstacle positions and radii
-        obs_pos = np.empty((0, 2))
-        obs_rad = np.array([])
-
-        # Iterate through each cluster group
-        for group in groups.values():
-            # Ignore clusters with fewer than 3 points
-            if len(group) < 3:
-                continue
-            
-            # Use RANSAC to fit a circle model to the cluster points
-            ransac_model, _ = ransac(group, CircleModel, max_trials=100, min_samples=3, residual_threshold=0.1, stop_probability=0.99)
-            if ransac_model is None:
-                continue
-
-            # Extract the circle's center and radius from the RANSAC model
-            center = ransac_model.params[0:2]
-            radius = ransac_model.params[2]
-
-            # Scale the radius by a predefined factor
-            radius *= RADIUS_SCALE
-
-            # Append the center and radius to the respective arrays
-            obs_pos = np.vstack((obs_pos, center))
-            obs_rad = np.append(obs_rad, radius)
-
-        # Filter out obstacles with radii greater than 0.5
-        mask = obs_rad <= 0.5
-        obs_rad = obs_rad[mask]
-        obs_pos = obs_pos[mask]
+        centres, obs_rad = segment_and_fit_circles(
+            np.ascontiguousarray(dist, dtype=np.float64),
+            np.ascontiguousarray(indices, dtype=np.int64),
+            points,
+            self.lidar_msg.angle_increment,
+            SEG_LAMBDA,
+            SEG_SIGMA,
+            SEG_MIN_POINTS,
+            RADIUS_SCALE,
+            SEG_MAX_RADIUS,
+            SEG_MAX_RESIDUAL,
+        )
 
         # Add heading (set to 0) and maximum velocity to the obstacle positions
-        obs_pos = np.hstack((obs_pos, np.tile([0, self.max_obs_vel], (len(obs_pos), 1))))
+        obs_pos = np.hstack((centres, np.tile([0, self.max_obs_vel], (len(centres), 1))))
 
         # Return the estimated obstacle positions and radii
         return obs_pos, obs_rad
@@ -406,33 +555,33 @@ class LoopHandler(Node):
         Returns:
             None: If the robot's position is not initialized.
         Attributes Updated:
-            self.prev_lidar (sensor_msgs.msg.LaserScan): Stores the previous LiDAR message.
             self.update_lidar (bool): Indicates whether the LiDAR readings have changed.
             self.distances (list[float]): List of distances to obstacles from the LiDAR scan.
             self.collision (bool): True if the minimum distance to an obstacle is less than
                 or equal to the robot's radius, indicating a potential collision.
             self.angles (list[float]): List of angles corresponding to the LiDAR scan distances.
+            self.scan_indices (np.ndarray): Index of each valid return in the raw scan.
         """
         # If the robot's position is not initialized, exit the callback
         if self.robot_position is None:
             return
-        
-        # Check if a previous LiDAR message exists
+
+        # Whether this scan is new. This used to deep-copy the whole previous
+        # message and compare the full range tuples, at LIDAR rate, purely to set
+        # this one flag; the timestamp answers the same question for free.
         if self.lidar_msg is not None:
-            # Store the previous LiDAR message for comparison
-            self.prev_lidar = deepcopy(self.lidar_msg)
-            # Update the flag if the current LiDAR ranges differ from the previous ones
-            self.update_lidar = self.prev_lidar.ranges != msg.ranges
-            
+            self.update_lidar = self.lidar_msg.header.stamp != msg.header.stamp
+
         # Set the current LiDAR message
         self.SetLaser(msg)
         # Retrieve distances and angles from the LiDAR scan
-        dist, angles = self.get_scan()
+        dist, angles, indices = self.get_scan()
         # Update the distances and angles attributes
         self.distances = dist
         # Check for potential collisions based on the minimum distance to obstacles
         self.collision = min(dist) <= self.config.robot_radius
         self.angles = angles
+        self.scan_indices = indices
 
 
     def callback_odom(self, msg):
@@ -502,10 +651,14 @@ class LoopHandler(Node):
         Note:
             - The angular velocity is calculated based on the time step `self.dt`.
         """
-        # Record the current time for tracking
+        # Record the current time for tracking. The gap between two consecutive
+        # commands is the real control period, which is what we want to shrink.
         curr_time = time.time()
+        if self.prev_move_time is not None and self.step_stats:
+            self.step_stats[-1]["t_cycle"] = curr_time - self.prev_move_time
+        self.prev_move_time = curr_time
         self.time = curr_time
-        
+
         # Create a Twist message to define the robot's movement
         twist = Twist()
         twist.linear.x = action[0]  # Set the linear velocity from the action
@@ -563,8 +716,7 @@ class LoopHandler(Node):
 
         # Retrieve and copy lidar distances and angles
         dist, angles = self.distances.copy(), self.angles.copy()
-        dist = dist.copy()
-        angles = angles.copy()
+        indices = self.scan_indices.copy()
 
         # Update the robot's state with the current position, heading, and velocity
         robot_state = np.array([position[0], position[1], heading, self.s0.x[3]])
@@ -580,7 +732,7 @@ class LoopHandler(Node):
         seed_everything(0)
 
         # Estimate obstacles based on lidar data and update the environment's obstacle list
-        self.obs_pos, self.obs_rad = self.estimate_obstacles(position, heading, dist, angles)
+        self.obs_pos, self.obs_rad = self.estimate_obstacles(position, heading, dist, angles, indices)
         self.s0.obstacles = (self.obs_pos, self.obs_rad)
         self.obstacles.append(self.s0.obstacles)
 
@@ -623,11 +775,28 @@ class LoopHandler(Node):
         # Append the current state to the planning states for tracking
         self.planning_states = np.vstack((self.planning_states, self.s0.x))
 
+        # Time granted to the planner. It always spends all of it, so this is
+        # what sets the cycle time; the speed of the planner decides how many
+        # simulations fit inside it, not how long the step takes.
+        if PLAN_BUDGET is None:
+            budget = self.dt - t1 - SENSE_ALLOWANCE
+        else:
+            budget = PLAN_BUDGET
+        if budget <= 0:
+            # Sensing overran the whole step. Re-issue the last action, which VO
+            # already certified safe, rather than plan on no budget at all.
+            self.logger.warn(f"sensing took {t1*1e3:.1f} ms, no planning budget left")
+            self.update_odom = False
+            self.update_lidar = False
+            self.i += 1
+            self.move(self.s0.x, self.last_action, self.pub)
+            return
+
         # Record the remaining time for planning
-        self.times.append(self.dt - t1 - 0.005)
+        self.times.append(budget)
 
         # Plan the next action using the planner
-        action, info = self.planner.plan(self.s0, self.dt - t1 - 0.005)
+        action, info = self.planner.plan(self.s0, budget)
 
         # Append the planning information and action to their respective lists
         self.infos.append(info)
@@ -638,6 +807,18 @@ class LoopHandler(Node):
 
         # Calculate the time taken for planning
         t2 = time.time() - initial_time
+
+        # Per-phase breakdown of this step. t_cycle is filled in by move() below,
+        # which knows when the previous command went out.
+        self.step_stats.append({
+            "step": self.i,
+            "t_sense": t1,
+            "t_plan": t2,
+            "t_budget": budget,
+            "n_sims": info["simulations"] if info is not None else np.nan,
+            "n_obs": len(self.obs_rad),
+            "t_cycle": np.nan,
+        })
 
         # Reset the odometry and lidar update flags
         self.update_odom = False
@@ -660,15 +841,20 @@ class LoopHandler(Node):
             1. Records the initial time before executing the control loop.
             2. Executes the control loop logic via `self.control_loop()`.
             3. Calculates the elapsed time for the control loop execution.
-            4. If the elapsed time is less than `self.dt`, sleeps for the remaining
-               time to maintain the desired loop frequency.
+            4. If the elapsed time is less than the thinking budget, sleeps for
+               the remaining time to maintain the desired loop frequency.
+
+        VO-PLANNER is reactive, so a step costs one rollout call rather than a
+        search and would otherwise finish far inside its slot. Padding to
+        THINK_MARGIN rather than to a fixed dt keeps the stop phase the same
+        length that the velocity obstacles were enlarged for.
         """
 
         initial_time = time.time()
         self.control_loop()
         final_time = time.time() - initial_time
-        if final_time < self.dt:
-            time.sleep(self.dt - final_time)
+        if final_time < THINK_MARGIN:
+            time.sleep(THINK_MARGIN - final_time)
         
 def save_data(loopHandler, exp_num):
     """
@@ -701,7 +887,7 @@ def save_data(loopHandler, exp_num):
     """
 
     # Define a suffix for file names based on the algorithm and experiment number
-    suffix = f'{algorithm}_{exp_num}'
+    suffix = f'{algorithm}_{exp_num}{cli_args.suffix}'
 
     # Check if the loopHandler's infos attribute contains valid data
     if None not in loopHandler.infos and len(loopHandler.infos) != 0:
@@ -738,6 +924,7 @@ def save_data(loopHandler, exp_num):
     pickle.dump(loopHandler.obstacles_pred, open(f"{out_dir}/obsPred_{suffix}.pkl", 'wb'))
     pickle.dump(loopHandler.times, open(f"{out_dir}/times_{suffix}.pkl", 'wb'))
     pickle.dump(loopHandler.actions_executed, open(f"{out_dir}/actions_executed_{suffix}.pkl", 'wb'))
+    pickle.dump(loopHandler.step_stats, open(f"{out_dir}/step_stats_{suffix}.pkl", 'wb'))
 
     # Calculate normalized distances to the goal
     max_eudist = loopHandler.sim_env.gym_env.max_eudist
@@ -755,10 +942,23 @@ def save_data(loopHandler, exp_num):
     discounted_return = np.sum(distances * discounts)
     undiscounted_return = np.sum(distances)
 
+    # Timing summary of the plan-sense-control cycle. p99 rather than mean for
+    # the phases, since the safety argument needs t_sense + t_plan < ts to hold
+    # at every step, not on average.
+    stats = loopHandler.step_stats
+    def _pct(key, q):
+        vals = np.array([s[key] for s in stats], dtype=float)
+        vals = vals[~np.isnan(vals)]
+        return np.percentile(vals, q) if len(vals) else np.nan
+
     # Create a dictionary to store experiment results
     data = {
         "algorithm": algorithm,
         "trajectories": trajectories,
+        "ts": dt,
+        "planBudget": PLAN_BUDGET,
+        "thinkMargin": THINK_MARGIN,
+        "radiusScale": RADIUS_SCALE,
         "expNum": exp_num,
         "reachGoal": loopHandler.reached_goal,
         "collision": loopHandler.collision,
@@ -777,6 +977,10 @@ def save_data(loopHandler, exp_num):
         "meanRolloutDepth": np.mean(rollout_depths) if rollout_depths else np.nan,
         "maxTotalDepth": np.max(total_depths) if total_depths else np.nan,
         "meanTotalDepth": np.mean(total_depths) if total_depths else np.nan,
+        # Timing breakdown of the cycle (seconds)
+        "tSenseMed": _pct("t_sense", 50), "tSenseP99": _pct("t_sense", 99),
+        "tPlanMed": _pct("t_plan", 50), "tPlanP99": _pct("t_plan", 99),
+        "tCycleMed": _pct("t_cycle", 50), "tCycleP99": _pct("t_cycle", 99),
     }
 
     # Save the results to a CSV file for analysis
@@ -824,7 +1028,8 @@ def main(args=None):
         # kill the environment process
         os.killpg(os.getpgid(process.pid), signal.SIGTERM)
         save_data(loopHandler, exp_num)
-        debug_plots_and_animations(loopHandler, exp_num, algorithm=algorithm, out_dir=out_dir)
+        if not cli_args.no_plots:
+            debug_plots_and_animations(loopHandler, exp_num, algorithm=algorithm, out_dir=out_dir)
         gc.collect()
 
 

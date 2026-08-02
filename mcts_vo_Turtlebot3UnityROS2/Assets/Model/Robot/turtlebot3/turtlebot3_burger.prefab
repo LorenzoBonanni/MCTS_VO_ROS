@@ -2110,7 +2110,7 @@ MonoBehaviour:
   RangeMinimum: 0.05
   RangeMaximum: 25
   ApertureAngle: 270
-  ScanningFrequency: 10
+  ScanningFrequency: 50
   AngularResolution: 0.25
   UseTimeIncrement: 0
   LayerMask:
@@ -2444,8 +2444,8 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   NodeName: odometry
   OdometryTopic: odom
-  OdometryPublishingFrequency: 10
-  TfPublishingFrequency: 10
+  OdometryPublishingFrequency: 50
+  TfPublishingFrequency: 50
   BaseRigidbody: {fileID: 0}
   OdomReferanceFrame: {fileID: 0}
   PublishTf: 1
