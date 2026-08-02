@@ -780,8 +780,11 @@ class LoopHandler(Node):
         # Check the distance to the goal
         d = dist_to_goal(self.s0.goal, position)
 
-        # Determine if the goal has been reached
-        self.reached_goal = d <= 0.2
+        # Determine if the goal has been reached. The tolerance matches the
+        # simulator's own terminal test (Env.step_*: dist_goal <= robot_radius),
+        # so that a state the planner treats as terminal is also one the loop
+        # scores as a success.
+        self.reached_goal = d <= self.config.robot_radius
 
         # Check termination conditions: maximum steps, goal reached, or collision
         if self.i == MAX_STEPS or self.reached_goal or self.collision:
