@@ -54,6 +54,13 @@ parser.add_argument('--exploration-c', default=1.0, type=float,
                          'bonus swamps the signal and action selection becomes '
                          'close to random. Values around 1 or below make it '
                          'discriminate.')
+parser.add_argument('--gamma-per-second', default=0.81, type=float,
+                    help='Discount per SECOND. The paper discounts by 0.9 per '
+                         'step at ts=0.1, i.e. 0.9**10 = 0.349 per second, an '
+                         'effective horizon of about 1 s - shorter than the '
+                         'time needed to reach the goal, so the first action '
+                         'barely changes the return. 0.81 is a ~5 s horizon. '
+                         'Pass 0.34867844 to reproduce the paper exactly.')
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
@@ -66,7 +73,6 @@ DEBUG_DIR = 'debug'
 
 MAX_STEPS = 350
 RADIUS_SCALE = 3
-DISCOUNT = 0.9
 DEPTH = 200
 dt = 0.1
 
@@ -79,6 +85,12 @@ exp_num = cli_args.exp_num
 algorithm = cli_args.algorithm
 trajectories = cli_args.trajectories
 EXPLORATION_C = cli_args.exploration_c
+
+# The discount is specified per second and converted to per step, so that the
+# effective horizon is a property of the problem rather than of the control
+# period: as a bare per-step constant it silently halved whenever dt did.
+GAMMA_S = cli_args.gamma_per_second
+DISCOUNT = GAMMA_S ** dt
 
 # Environment executable and output directory for the selected trajectories
 env_build = ENV_BUILDS[trajectories]
