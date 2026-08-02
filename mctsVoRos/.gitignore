@@ -168,3 +168,10 @@ cython_debug/
 #.idea/
 debug/
 plots/
+# Local analysis tooling output. summarize_debug.py and SUMMARIZE_README.md are
+# tracked; everything they produce is not - it is derived from debug/ and would
+# otherwise turn every experiment batch into a pile of untracked noise.
+debug_archive/
+debug_plots/
+debug_summary.csv
+debug_runs.csv
