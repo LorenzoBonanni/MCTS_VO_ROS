@@ -74,6 +74,15 @@ parser.add_argument('--rollout-collision', default='check', type=str,
                          "robot_radius ends the rollout with -100); 'none' "
                          'reproduces step_no_check_coll, leaving collision '
                          'avoidance entirely to VO pruning in the tree.')
+parser.add_argument('--collect-trajectories', action='store_true',
+                    help='Record every simulated state so that the rollout '
+                         'tree animation can be produced. Costs about a tenth '
+                         'of the planning budget and forces the uncompiled '
+                         'rollout, so it is off by default.')
+parser.add_argument('--no-plots', action='store_true',
+                    help='Skip the debug plots and animations at the end of a '
+                         'run. Rendering the trajectory GIF takes far longer '
+                         'than the run itself, so sweeps want this.')
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
@@ -105,6 +114,7 @@ trajectories = cli_args.trajectories
 EXPLORATION_C = cli_args.exploration_c
 RADIUS_SCALE = cli_args.radius_scale
 ROLLOUT_COLLISION_CHECK = cli_args.rollout_collision == 'check'
+collect_trajectories = cli_args.collect_trajectories
 
 # The discount is specified per second and converted to per step, so that the
 # effective horizon is a property of the problem rather than of the control
@@ -222,6 +232,7 @@ class LoopHandler(Node):
                 # must match the eps of rollout_policy above
                 rollout_eps=0.4,
                 rollout_collision_check=ROLLOUT_COLLISION_CHECK,
+                collect_trajectories=collect_trajectories,
             )
         elif algorithm == 'VO-TREE':
             _, self.sim_env = create_pedestrian_env(
@@ -251,6 +262,7 @@ class LoopHandler(Node):
                 # must match the eps of rollout_policy above
                 rollout_eps=0.2,
                 rollout_collision_check=ROLLOUT_COLLISION_CHECK,
+                collect_trajectories=collect_trajectories,
             )
         elif algorithm == 'VO-PLANNER':
             _, self.sim_env = create_pedestrian_env(
@@ -949,7 +961,8 @@ def main(args=None):
         # kill the environment process
         os.killpg(os.getpgid(process.pid), signal.SIGTERM)
         save_data(loopHandler, exp_num)
-        debug_plots_and_animations(loopHandler, exp_num, algorithm=algorithm, out_dir=out_dir)
+        if not cli_args.no_plots:
+            debug_plots_and_animations(loopHandler, exp_num, algorithm=algorithm, out_dir=out_dir)
         gc.collect()
 
 

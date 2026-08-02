@@ -97,9 +97,16 @@ def debug_plots_and_animations(loopHandler, exp_num, algorithm, out_dir='debug')
     ani.save(os.path.join(anim_dir, f"trajectory_{suffix}.gif"))
     plt.close(fig)
     
-    if algorithm != 'VO-PLANNER':
+    infos = loopHandler.infos
+    # The tree animation needs every state the planner simulated, which is only
+    # recorded when the run asked for it (--collect-trajectories): maintaining
+    # that record costs about a tenth of the planning budget, so it is off by
+    # default. VO-PLANNER has no tree and reports no info at all.
+    has_trajectories = bool(infos) and all(
+        i is not None and len(i.get("trajectories", ())) for i in infos
+    )
+    if algorithm != 'VO-PLANNER' and has_trajectories:
         print("Creating animation")
-        infos = loopHandler.infos
         trajectories = [i["trajectories"] for i in infos]
         rollout_values = [i["rollout_values"] for i in infos]
 
