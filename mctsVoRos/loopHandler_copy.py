@@ -71,10 +71,16 @@ ENV_BUILDS = {
 # Root directory of every artifact produced by the experiments
 DEBUG_DIR = 'debug'
 
-MAX_STEPS = 350
 RADIUS_SCALE = 3
 DEPTH = 200
 dt = 0.1
+
+# Episode length as a time budget rather than a step count. As a fixed 350
+# steps it silently shrank with dt: at dt = 0.05 an episode allowed 17.5 s of
+# motion against 35 s at dt = 0.1, i.e. 3.85 m of travel for a goal 3.30 m
+# away, so a faster control loop was being scored on half the distance budget.
+EPISODE_S = 35.0
+MAX_STEPS = int(round(EPISODE_S / dt))
 
 # Options for the planner
 # MCTS
