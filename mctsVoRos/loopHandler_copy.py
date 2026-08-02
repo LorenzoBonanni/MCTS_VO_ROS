@@ -106,11 +106,34 @@ parser.add_argument('--env-build', default=None, type=str,
 parser.add_argument('--suffix', default='', type=str,
                     help='Extra tag appended to every output filename, so that '
                          'sweeps do not overwrite each other.')
+parser.add_argument('--env-render', default='headless', type=str,
+                    choices=['headless', 'low', 'full'],
+                    help='How the Unity environment renders, which is what '
+                         'actually sets the sensor publish rate: LaserScanner2D '
+                         'triggers from a coroutine and scans in Update(), both '
+                         'of which run once per frame, so ScanningFrequency is '
+                         'silently clamped to the frame rate and rounded down to '
+                         'a multiple of it. Measured on a scene configured for '
+                         "50 Hz: 'full' (Ultra + vSync, the old behaviour) gives "
+                         "16.8 Hz, 'low' gives 39.4 Hz and is still watchable, "
+                         "'headless' gives 49.7 Hz. Since control_loop skips a "
+                         'tick whenever no new scan has arrived, that rate is '
+                         'the hard floor on the cycle time: cycle >= 2/rate.')
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
     'sinusoidal': '../env_build/sin_env/env.x86_64',
     'intention': '../env_build/int_env/env.x86_64',
+}
+
+# Command line arguments handed to the Unity player per --env-render. The
+# project's default quality level is 5 (Ultra) with vSync on, which is what held
+# the frame rate - and therefore the sensor publish rate - down to 16.8 Hz on a
+# scene configured for 50 Hz.
+ENV_RENDER_ARGS = {
+    'headless': ['-batchmode', '-nographics'],
+    'low': ['-screen-quality', 'Low'],
+    'full': [],
 }
 
 # Root directory of every artifact produced by the experiments
@@ -1034,8 +1057,10 @@ def main(args=None):
     gc.disable()
     print(f"Experiment: {exp_num} | Algorithm: {algorithm} | Trajectories: {trajectories}")
     print(f"Environment: {env_build} | Output directory: {out_dir}")
+    print(f"Render mode: {cli_args.env_render} ({' '.join(ENV_RENDER_ARGS[cli_args.env_render]) or 'default'})")
     loopHandler = LoopHandler(dt)
-    process = subprocess.Popen([env_build], preexec_fn=os.setpgrp)
+    process = subprocess.Popen([env_build] + ENV_RENDER_ARGS[cli_args.env_render],
+                               preexec_fn=os.setpgrp)
     time.sleep(2)
     try:
         executor = SingleThreadedExecutor()
