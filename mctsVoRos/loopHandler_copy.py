@@ -122,9 +122,15 @@ parser.add_argument('--env-render', default='headless', type=str,
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
-    'sinusoidal': '../env_build/sin_env/env.x86_64',
-    'intention': '../env_build/int_env/env.x86_64',
+    'sinusoidal': '../env_build/sin_env_fixed/env.x86_64',
+    'intention': '../env_build/int_env_fixed/env.x86_64',
 }
+# The pre-fix builds, kept reachable by path through --env-build. Their
+# obstacles step on the frame clock, so they run at about half speed whenever
+# the frame rate does not divide the 0.1 s step - 0.050 m/s windowed against
+# 0.101 m/s headless. The published results were produced on those.
+#   ../env_build/{sin,int}_env/env.x86_64        pre-fix, 7.5 Hz sensors
+#   ../env_build/{sin,int}_env_50hz/env.x86_64   pre-fix, 50 Hz sensors
 
 # Command line arguments handed to the Unity player per --env-render. The
 # project's default quality level is 5 (Ultra) with vSync on, which is what held
@@ -988,6 +994,12 @@ def save_data(loopHandler, exp_num):
     data = {
         "algorithm": algorithm,
         "trajectories": trajectories,
+        # Which simulator produced this run. Obstacle speed differs by a factor
+        # of two between the pre-fix builds and the fixed ones, and on the
+        # pre-fix builds also with the render mode, so a result is not
+        # interpretable without them.
+        "envBuild": env_build,
+        "envRender": cli_args.env_render,
         "expNum": exp_num,
         "reachGoal": loopHandler.reached_goal,
         "collision": loopHandler.collision,
