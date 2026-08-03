@@ -54,22 +54,51 @@ parser.add_argument('--exploration-c', default=1.0, type=float,
                          'bonus swamps the signal and action selection becomes '
                          'close to random. Values around 1 or below make it '
                          'discriminate.')
+parser.add_argument('--env-build', default='fixed',
+                    choices=['fixed', 'orig', '50hz'],
+                    help='Which Unity build to launch. It matters: the movement '
+                         'scripts used to step on the frame clock, so obstacle '
+                         'speed depended on the render mode - 0.050 m/s '
+                         'windowed against 0.101 m/s headless, for a scripted '
+                         '0.100. "fixed" carries the corrected scripts and '
+                         'measures 0.099/0.102 across a 290x range of frame '
+                         'rates. "orig" is the pre-fix 7.5 Hz build the '
+                         'published results were produced with, i.e. obstacles '
+                         'at roughly half speed; "50hz" is the pre-fix build at '
+                         '50 Hz. Recorded in the output CSV as envBuild.')
+parser.add_argument('--env-render', default='window',
+                    choices=['window', 'headless'],
+                    help='Whether the Unity build renders a window. With the '
+                         '"fixed" build this is cosmetic. With "orig" or '
+                         '"50hz" it is not: the frame rate sets the obstacle '
+                         'speed there, so headless runs a materially harder '
+                         'scene. Recorded in the output CSV as envRender.')
 
-# Unity build associated to each type of obstacle trajectory
+# Unity builds, per obstacle-trajectory type. Three variants exist because the
+# obstacle-motion fix changes the environment rather than the planner, so runs
+# either side of it are not comparable and the choice has to be recorded.
 ENV_BUILDS = {
-    'sinusoidal': '../env_build/sin_env_50hz/env.x86_64',
-    'intention': '../env_build/int_env_50hz/env.x86_64',
+    'fixed': {
+        'sinusoidal': '../env_build/sin_env_fixed/env.x86_64',
+        'intention': '../env_build/int_env_fixed/env.x86_64',
+    },
+    'orig': {
+        'sinusoidal': '../env_build/sin_env/env.x86_64',
+        'intention': '../env_build/int_env/env.x86_64',
+    },
+    '50hz': {
+        'sinusoidal': '../env_build/sin_env_50hz/env.x86_64',
+        'intention': '../env_build/int_env_50hz/env.x86_64',
+    },
 }
 
-# Launched headless. The Unity scene asks for 50 Hz on /scan and /odom, but
-# LaserScanner2D triggers from a coroutine and scans in Update(), both of which
-# run once per frame, so the publish rate is clamped to the frame rate and
-# rounded down to a multiple of it. At the project's default quality level
-# (5, Ultra, with vSync) that frame rate is ~17 FPS, which yields 16.8 Hz;
-# headless it is ~195 FPS, which yields the configured 49.7 Hz. Since
-# control_loop skips a tick whenever no new scan has arrived, that rate is a
-# hard floor on the cycle time: cycle >= 2/rate.
-ENV_RENDER_ARGS = ['-batchmode', '-nographics']
+# Measured frame rates: ~17 FPS windowed (vSync, quality level 5), ~4900 FPS
+# headless. On the pre-fix builds that difference set the obstacle speed; on the
+# fixed builds it does not.
+ENV_RENDER_ARGS_BY_MODE = {
+    'window': [],
+    'headless': ['-batchmode', '-nographics'],
+}
 
 # Root directory of every artifact produced by the experiments
 DEBUG_DIR = 'debug'
@@ -89,9 +118,10 @@ exp_num = cli_args.exp_num
 algorithm = cli_args.algorithm
 trajectories = cli_args.trajectories
 EXPLORATION_C = cli_args.exploration_c
+ENV_RENDER_ARGS = ENV_RENDER_ARGS_BY_MODE[cli_args.env_render]
 
 # Environment executable and output directory for the selected trajectories
-env_build = ENV_BUILDS[trajectories]
+env_build = ENV_BUILDS[cli_args.env_build][trajectories]
 out_dir = os.path.join(DEBUG_DIR, trajectories)
 os.makedirs(out_dir, exist_ok=True)
 
@@ -800,6 +830,11 @@ def save_data(loopHandler, exp_num):
     data = {
         "algorithm": algorithm,
         "trajectories": trajectories,
+        # Which simulator produced this run. Obstacle speed differs by a factor
+        # of two between envBuild=orig/50hz and fixed, and on the pre-fix builds
+        # also with envRender, so a result is not interpretable without them.
+        "envBuild": cli_args.env_build,
+        "envRender": cli_args.env_render,
         "expNum": exp_num,
         "reachGoal": loopHandler.reached_goal,
         "collision": loopHandler.collision,

@@ -29,6 +29,10 @@
 #   -f, --force              re-run configurations that already have results
 #                            (by default completed runs are skipped, so the
 #                             campaign can be resumed after an interruption)
+#   -x, --extra "ARGS"       extra arguments passed straight to
+#                            loopHandler_copy.py, e.g. to reproduce the
+#                            published configuration:
+#                              -x "--max-obs-vel 0.1 --exploration-c 10"
 #       --skip-build         source and activate, but do not run colcon build
 #       --skip-setup         run the experiments in the current shell, without
 #                            sourcing/building/activating anything
@@ -37,12 +41,13 @@
 
 set -u
 
-NUM_EXP=30
+NUM_EXP=10
 ALGORITHMS=("MCTS" "VO-TREE" "VO-PLANNER")
 TRAJECTORIES=("sinusoidal" "intention")
 FORCE=0
 SKIP_BUILD=0
 SKIP_SETUP=0
+EXTRA_ARGS=()
 ROS_DISTRO_NAME="${ROS_DISTRO:-foxy}"
 
 usage() {
@@ -56,6 +61,7 @@ while [[ $# -gt 0 ]]; do
         -a|--algorithms)   read -r -a ALGORITHMS <<< "$2"; shift 2 ;;
         -t|--trajectories) read -r -a TRAJECTORIES <<< "$2"; shift 2 ;;
         -f|--force)        FORCE=1; shift ;;
+        -x|--extra)        read -r -a EXTRA_ARGS <<< "$2"; shift 2 ;;
         --skip-build)      SKIP_BUILD=1; shift ;;
         --skip-setup)      SKIP_SETUP=1; shift ;;
         --ros-distro)      ROS_DISTRO_NAME="$2"; shift 2 ;;
@@ -164,6 +170,7 @@ echo " Workspace:    ${WS_ROOT}"
 echo " Algorithms:   ${ALGORITHMS[*]}"
 echo " Trajectories: ${TRAJECTORIES[*]}"
 echo " Runs each:    ${NUM_EXP}"
+echo " Extra args:   ${EXTRA_ARGS[*]-<none>}"
 echo " Total runs:   ${TOTAL}"
 echo "=========================================================="
 
@@ -196,6 +203,7 @@ for traj in "${TRAJECTORIES[@]}"; do
                 --exp_num "${exp}" \
                 --algorithm "${algo}" \
                 --trajectories "${traj}" \
+                ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
                 > "${log_file}" 2>&1
 
             status=$?
