@@ -23,10 +23,15 @@ run these commands on the host, so **every command that works on the host works
 here unchanged** — including the campaign script and the analysis tooling:
 
 ```bash
-docker/run.sh ./run_all_experiments.sh -n 30
+docker/run.sh ./run_all_experiments.sh -n 30 --skip-setup
 docker/run.sh python3 summarize_debug.py --no-csv --label B4
 docker/run.sh                                # interactive shell
 ```
+
+`--skip-setup` is required for the campaign script: it otherwise sources ROS,
+runs `colcon build` and activates `venv/`, none of which apply inside the
+container — the entrypoint has already sourced ROS, and the requirements are
+installed into the system interpreter. Verified end to end with it.
 
 ### If you get "permission denied ... docker.sock"
 
@@ -42,16 +47,21 @@ sg docker -c "docker/run.sh ..."
 `run.sh` passes the X socket, `$XAUTHORITY` and `/dev/dri` through whenever
 `DISPLAY` is set, so `--env-render window` opens a real Unity window on your
 desktop. Nothing extra is needed; with no `DISPLAY` (over ssh, say) the script
-says so and only headless runs are possible.
+says so and headless runs still work.
 
 Verified on this machine, one full VO-TREE run on the intention scene:
 
 | | outcome | steps | sims/step |
 |---|---|---|---|
-| `--env-render headless` | obsCollision | 293 | 41.2 |
-| `--env-render window` | **goal reached** | 255 | 38.8 |
+| headless, no X at all | goal reached | 278 | 49.2 |
+| headless, X available | obsCollision | 293 | 41.2 |
+| `--env-render window` | goal reached | 255 | 38.8 |
 
-Both wrote the CSV, the trajectory GIF and the rollout MP4.
+All three wrote the CSV, the trajectory GIF and the rollout MP4. The first was
+run with `DISPLAY` and `XAUTHORITY` unset, so no X socket and no `/dev/dri`
+were mounted — Unity is started with `-batchmode -nographics` and never opens a
+GL context, and matplotlib renders through `Agg`, so nothing wants a display.
+The spread in sims/step is the wall-clock search budget, not the container.
 
 ## What is and is not reproduced exactly
 
