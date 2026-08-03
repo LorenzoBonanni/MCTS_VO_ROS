@@ -5,11 +5,15 @@ using UnityEngine;
 public class move_copy : MonoBehaviour
 {
 
-    public float dt = 0.3f; // Time interval for movement
+    public float dt = 0.1f; // Time interval for movement
     private float timer = 0f;
     private Vector3 startPosition;
     private Vector3 targetPosition;
-    private int idx = 240-60;
+    // Step counts, not seconds. These were sized for dt = 0.2 and are doubled
+    // now that every obstacle runs at 0.1, so the traverse still takes 48 s
+    // and covers the same ground, in half-size steps.
+    private int period = 480;
+    private int idx = 480-120;
 
     // PARAMETERS SINUSOIDAL
     public float amplitude = 0.01f; // Amplitude of the sinusoidal wave
@@ -74,7 +78,7 @@ public class move_copy : MonoBehaviour
 
         float speed = Random.Range(0.0f, 0.1f);
         forwardSpeed = mulForwardSpeed * speed;
-        if (idx == 240){
+        if (idx == period){
             mulForwardSpeed *= -1;
             idx = 0;
         }
