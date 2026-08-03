@@ -5,10 +5,14 @@ using UnityEngine;
 public class move_4_copy : MonoBehaviour
 {
 
-    public float dt = 0.3f; // Time interval for movement
+    public float dt = 0.1f; // Time interval for movement
     private float timer = 0f;
     private Vector3 startPosition;
     private Vector3 targetPosition;
+    // Step count, not seconds. Sized for dt = 0.2 and doubled now that every
+    // obstacle runs at 0.1, so the traverse still takes 24 s and covers the
+    // same ground, in half-size steps.
+    private int period = 240;
     private int idx = 0;
 
     // PARAMETERS SINUSOIDAL
@@ -73,7 +77,7 @@ public class move_4_copy : MonoBehaviour
 
         float speed = Random.Range(0.05f, 0.1f);
         forwardSpeed = mulForwardSpeed * speed;
-        if (idx == 120){
+        if (idx == period){
             mulForwardSpeed *= -1;
             idx = 0;
         }
