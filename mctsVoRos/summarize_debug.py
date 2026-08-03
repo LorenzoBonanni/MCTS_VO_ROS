@@ -547,22 +547,47 @@ def render_animations(tasks, goal, fps=10, stride=1, jobs=1):
     return written
 
 
+def _wanted(value):
+    """A filter option as a list: "MCTS,VO-TREE" -> ["MCTS", "VO-TREE"].
+
+    Comma-separated rather than nargs="+", which would be greedy enough to
+    swallow the subcommand: "--algo MCTS VO-TREE plot" would take "plot" as a
+    third algorithm and never dispatch. An empty string stays one empty entry,
+    because --label "" means the live folder.
+    """
+    if value is None:
+        return None
+    return [v.strip() for v in value.split(",")]
+
+
 def apply_filters(runs, args):
     """Restrict a run list by algorithm, environment and snapshot label.
 
-    --label "" is meaningful (the live folder), so it is tested against None
-    rather than for truthiness the way the other two are.
+    Each option takes a comma-separated list, so several algorithms or
+    snapshots can be compared side by side. --label "" is meaningful (the live
+    folder), so it is tested against None rather than for truthiness.
     """
-    algo = getattr(args, "algo", None)
-    scene = getattr(args, "scene", None)
-    label = getattr(args, "label", None)
+    algo = _wanted(getattr(args, "algo", None))
+    scene = _wanted(getattr(args, "scene", None))
+    label = _wanted(getattr(args, "label", None))
+
+    # A typo in one entry of a list would otherwise just quietly return fewer
+    # runs, which looks like a result rather than a mistake.
+    for name, wanted, have in (("algo", algo, {r.algorithm for r in runs}),
+                               ("scene", scene, {r.trajectories for r in runs}),
+                               ("label", label, {r.source for r in runs})):
+        for v in wanted or []:
+            if not any(v.lower() == h.lower() for h in have):
+                warn(f"--{name} {v!r} matches nothing; available: "
+                     + ", ".join(sorted(repr(h) for h in have)))
+
     out = []
     for r in runs:
-        if algo and r.algorithm.lower() != algo.lower():
+        if algo and not any(r.algorithm.lower() == a.lower() for a in algo):
             continue
-        if scene and r.trajectories != scene:
+        if scene and not any(r.trajectories.lower() == s.lower() for s in scene):
             continue
-        if label is not None and r.source != label:
+        if label is not None and r.source not in label:
             continue
         out.append(r)
     return out
@@ -572,12 +597,12 @@ def describe_filters(args):
     """The active filters, phrased for an error message or a header line."""
     bits = []
     for name in ("algo", "scene"):
-        v = getattr(args, name, None)
+        v = _wanted(getattr(args, name, None))
         if v:
-            bits.append(f"{name}={v}")
-    label = getattr(args, "label", None)
+            bits.append(f"{name}={'+'.join(v)}")
+    label = _wanted(getattr(args, "label", None))
     if label is not None:
-        bits.append("label=" + (label if label else "<live>"))
+        bits.append("label=" + "+".join(x if x else "<live>" for x in label))
     return ", ".join(bits) if bits else "no filter"
 
 
@@ -1015,13 +1040,15 @@ def main():
         top-level parser already put in the namespace.
         """
         d = {} if top else {"default": argparse.SUPPRESS}
-        sp.add_argument("--algo", metavar="A", **d,
-                        help="restrict to one algorithm: MCTS, VO-TREE, VO-PLANNER")
-        sp.add_argument("--scene", metavar="S", **d,
-                        help="restrict to one environment: sinusoidal or intention")
-        sp.add_argument("--label", metavar="L", **d,
-                        help="restrict to one snapshot (B3), or '' for the live "
-                             "folder only. Without it, every snapshot is included.")
+        sp.add_argument("--algo", metavar="A[,A...]", **d,
+                        help="restrict to these algorithms, comma-separated: "
+                             "MCTS, VO-TREE, VO-PLANNER")
+        sp.add_argument("--scene", metavar="S[,S...]", **d,
+                        help="restrict to these environments: sinusoidal, intention")
+        sp.add_argument("--label", metavar="L[,L...]", **d,
+                        help="restrict to these snapshots (B3,B4), or '' for the "
+                             "live folder only. Without it, every snapshot is "
+                             "included.")
         return sp
 
     filters(p, top=True)

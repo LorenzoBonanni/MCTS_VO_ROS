@@ -46,12 +46,14 @@ Other things you may want:
 # only the live folder, ignoring snapshots
 python3 summarize_debug.py --no-archive
 
-# narrow it down: any combination of the three
+# narrow it down: any combination of the three, each a comma-separated list
 python3 summarize_debug.py --algo VO-TREE            # one algorithm, every snapshot
+python3 summarize_debug.py --algo MCTS,VO-TREE       # two, side by side
 python3 summarize_debug.py --scene intention         # one environment
 python3 summarize_debug.py --label B3                # one snapshot
+python3 summarize_debug.py --label B3,B4             # compare two steps
 python3 summarize_debug.py --label ""                # the live folder only
-python3 summarize_debug.py --algo MCTS --scene sinusoidal --label B1
+python3 summarize_debug.py --algo MCTS,VO-TREE --scene sinusoidal --label B1
 
 # the older experiments, which are sitting in the trash
 python3 summarize_debug.py --dir ~/.local/share/Trash/files/debug
@@ -119,7 +121,13 @@ python3 summarize_debug.py plot --label B3 --anim   # one snapshot only
 
 `--algo`, `--scene` and `--label` work on **both** the summary and `plot`, and can be given
 before or after the subcommand. They combine, and the header line tells you how much they cut:
-`algo=VO-TREE, scene=intention: 50 of 260 runs`.
+`algo=MCTS+VO-TREE, scene=intention: 20 of 260 runs`.
+
+Each takes a **comma-separated list** — `--algo MCTS,VO-TREE`, `--label B3,B4` — matched
+case-insensitively. Comma-separated rather than repeated words, because `--algo MCTS VO-TREE plot`
+would let argparse swallow `plot` as a third algorithm and never reach the subcommand. An entry
+matching nothing gets a warning naming what *is* available, so a typo in one item of a list
+doesn't quietly return fewer runs and look like a result.
 
 `--label` matters more than it looks: without it, the sources are `debug/` **plus every
 snapshot**, so `plot --anim` re-renders B1 as well as B3. `--label B3` restricts it to one, and
