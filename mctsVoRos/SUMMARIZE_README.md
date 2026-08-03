@@ -84,15 +84,17 @@ It deletes **only what it verified into the archive**, so nothing can be lost to
 
 ```bash
 python3 summarize_debug.py snapshot B2 --keep              # copy, don't clear debug/
-python3 summarize_debug.py snapshot B2 --with-animations   # archive the GIFs too
+python3 summarize_debug.py snapshot B2 --with-animations   # render animations into it too
 python3 summarize_debug.py snapshot B2 --no-plots          # archive without drawing
 python3 summarize_debug.py snapshot B2 --force             # replace an existing label
 ```
 
-The rendered `animations/` folder is **not** archived by default: it is about 80 % of the folder
-(210 MB of 260 MB on a full campaign) and can be regenerated from the pickles. Because it is not
-archived it is also not deleted — it stays in `debug/`, and the script says so. Everything else,
-roughly 50 MB per campaign, is archived.
+**Two different sets of animations exist, and the archive holds only one of them.** The simulator
+writes its own per-run GIFs and MP4s into `debug/<scene>/animations/` at the end of each run.
+Those are *never* archived and *never* deleted — they stay where they are, and the script says how
+many it left behind. The pictures that go into the archive are the ones this script renders, into
+`<label>/plots/<algorithm>/<scene>/<outcome>/`, so they match the stills and the outcome
+foldering. `--with-animations` renders those; it does not copy anything.
 
 Then `python3 summarize_debug.py` shows every snapshot next to the live folder, prefixed with its
 label, so you can watch the numbers move as each fix lands.
@@ -105,19 +107,32 @@ python3 summarize_debug.py plot --anim              # ...and animations too
 python3 summarize_debug.py plot VO-TREE             # every VO-TREE run, both scenes
 python3 summarize_debug.py plot VO-TREE_3           # a single run
 python3 summarize_debug.py plot VO-TREE --grid      # only the group sheet
+python3 summarize_debug.py plot --label B3 --anim   # one snapshot only
 ```
+
+`--label` matters more than it looks: without it, the sources are `debug/` **plus every
+snapshot**, so `plot --anim` re-renders B1 as well as B3. `--label B3` restricts it to one, and
+`--label ""` to the live folder. Do not use `--dir debug_archive/B3` for this — that discovers
+those runs with no label, files them at the top level of `debug_plots/` instead of under `B3/`,
+and finds them a second time through the archive scan.
 
 **Recreating everything after deleting `debug_plots/`** — the run argument is optional, and the
 sources are `debug/` plus every snapshot, so one command rebuilds the lot:
 
 ```bash
 python3 summarize_debug.py plot            # ~15 s for a 180-run campaign
-python3 summarize_debug.py plot --anim     # ~20 min, animations included
+python3 summarize_debug.py plot --anim     # ~3 min on 8 cores, animations included
 ```
 
-Timings are measured: stills are a fraction of a second each, animations about 0.04 s per
-simulation step, so 6–15 s per run depending on its length. `--limit N` caps it, and Ctrl-C is
-safe — the stills are written before the animations start.
+Timings are measured. Stills are a fraction of a second each. Animations cost about 0.026 s per
+simulation step per core — 4 s for a 160-step run — and `--jobs` (default: 8, or your core count)
+divides a campaign across cores: 60 runs take 54 s rather than the 8½ minutes the same work used
+to take. `--limit N` caps it, `--stride 2` halves the frames, and Ctrl-C is safe — every still is
+written before the first animation starts.
+
+If you want them smaller, `--format .mp4` is about 25 % faster to write and five times smaller
+(76 kB against 373 kB for a 158-frame run), at the cost of needing a player rather than any image
+viewer.
 
 To rebuild the plots *inside* a snapshot rather than in `debug_plots/`:
 
@@ -177,10 +192,15 @@ detection over the whole run as faint grey dots, and the last step's detections 
 Those circles are the radii *as VO saw them*, i.e. after `RADIUS_SCALE`, so if they look far bigger
 than the 0.1 m obstacles really are, that is the scale factor and not a bug in the plot.
 
-**`--anim`** calls `plot_frame2` from `MCTS_VO/experiment_utils.py` — the same renderer
-`debug_utils.py` uses at the end of a run, so the animation is the one you already know. It
-*adds* animations rather than replacing the stills, and prints per-run progress, since a full
-campaign runs for twenty minutes and a silent process that long is hard to tell from a hung one.
+**`--anim`** draws the same picture as `plot_frame2` in `MCTS_VO/experiment_utils.py` — the
+renderer `debug_utils.py` uses at the end of a run — but builds its artists once and then updates
+their data, where `plot_frame2` clears the axes and rebuilds everything each frame. That was
+43 ms per frame and is now 26 ms; the rest is GIF encoding. The output is **pixel-identical** —
+verified frame by frame on raw RGB buffers over 1540 frames of eight runs, covering both scenes,
+all three algorithms, obstacle counts from 2 to 8, and archives with and without `obs_`.
+`--anim` *adds*
+animations rather than replacing the stills, and prints per-run progress, since a silent process
+for minutes is hard to tell from a hung one.
 
 Three things worth knowing:
 
