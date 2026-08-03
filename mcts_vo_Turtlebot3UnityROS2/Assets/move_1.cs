@@ -104,19 +104,25 @@ public class move_1 : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        // `while` rather than `if`, and `timer -= dt` rather than `timer = 0f`:
+        // the timer is only inspected once per frame, so the deadline is always
+        // crossed some way into a frame. Zeroing it threw that remainder away,
+        // which stretched a step from dt to ceil(dt/frameTime)*frameTime, and
+        // taking the next target from the interpolated position abandoned
+        // whatever fraction of the step had not been covered yet. Together
+        // those made the obstacle's speed a function of the frame rate: 0.05
+        // m/s at 15 FPS against 0.10 m/s at 4500 FPS, for the same 0.10 m/s
+        // written here. Carrying the remainder and finishing the step first
+        // makes it dt per step at any frame rate.
         timer += Time.deltaTime;
-
-        if (timer >= dt){
-            timer = 0f;
-            startPosition = transform.position;
+        while (timer >= dt)
+        {
+            timer -= dt;
+            transform.position = targetPosition;
+            startPosition = targetPosition;
             targetPosition = startPosition + next_step();
         }
-        else
-        {
-            // Interpolate the position smoothly between the start and target positions
-            float t = timer / dt;
-            transform.position = Vector3.Lerp(startPosition, targetPosition, t);
-        }
-
+        // Interpolate the position smoothly between the start and target positions
+        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / dt);
     }
 }
