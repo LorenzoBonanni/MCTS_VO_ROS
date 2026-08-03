@@ -107,9 +107,15 @@ Four things differ from a workstation, and they are what will bite:
   `import rclpy` fails; the equivalent is to wrap each command in
   `bash -c 'source /opt/ros/foxy/setup.bash && ...'`.
 - **`$HOME` inside the container is not yours.** The engine runs as your cluster
-  UID, not the image's `mctsvo` user, so `/home/mctsvo` is not writable — hence
-  the `NUMBA_CACHE_DIR` and `MPLCONFIGDIR` overrides above. Without them numba
-  recompiles every run and matplotlib complains.
+  UID, not the image's `mctsvo` user, so `/home/mctsvo` is not writable and the
+  two cache directories above have to point somewhere that is.
+
+  `NUMBA_CACHE_DIR` is the one that matters. The compiled kernels take about
+  **9 s** to build and 0.3 s to load, so without a writable cache every run pays
+  those 9 s before doing any work — roughly five minutes across a 30-run
+  campaign. `MPLCONFIGDIR` only silences a warning: matplotlib falls back to a
+  temporary directory by itself, and with 82 fonts in the image the cache it
+  rebuilds costs nothing measurable.
 - **Headless only.** There is no display and no `/dev/dri`, so
   `--env-render headless` is the only mode. It needs no GPU.
 - **Clone to scratch, not `$HOME`.** The repo carries ~890 MB of Unity builds,
