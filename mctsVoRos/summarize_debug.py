@@ -305,7 +305,7 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
         groups[group_key(r)].append(r)
     keys = sorted(groups)
 
-    print(f"\n{len(runs)} runs in {len(keys)} groups")
+    print(f"\n{len(runs)} runs in {len(keys)} group{'' if len(keys) == 1 else 's'}")
 
     out_rows, ret_rows, tim_rows, dep_rows, smo_rows, wide = [], [], [], [], [], []
     any_derived = False
@@ -547,6 +547,40 @@ def render_animations(tasks, goal, fps=10, stride=1, jobs=1):
     return written
 
 
+def apply_filters(runs, args):
+    """Restrict a run list by algorithm, environment and snapshot label.
+
+    --label "" is meaningful (the live folder), so it is tested against None
+    rather than for truthiness the way the other two are.
+    """
+    algo = getattr(args, "algo", None)
+    scene = getattr(args, "scene", None)
+    label = getattr(args, "label", None)
+    out = []
+    for r in runs:
+        if algo and r.algorithm.lower() != algo.lower():
+            continue
+        if scene and r.trajectories != scene:
+            continue
+        if label is not None and r.source != label:
+            continue
+        out.append(r)
+    return out
+
+
+def describe_filters(args):
+    """The active filters, phrased for an error message or a header line."""
+    bits = []
+    for name in ("algo", "scene"):
+        v = getattr(args, name, None)
+        if v:
+            bits.append(f"{name}={v}")
+    label = getattr(args, "label", None)
+    if label is not None:
+        bits.append("label=" + (label if label else "<live>"))
+    return ", ".join(bits) if bits else "no filter"
+
+
 def plot_dir(base, run, outcome=None, flat=False):
     """<base>/[<snapshot>/]<algorithm>/<environment>/<outcome>/
 
@@ -744,14 +778,11 @@ def do_plot(args, runs):
     sel = [r for r in runs
            if f"{r.algorithm}_{r.exp_num}{r.suffix}".startswith(args.run)
            or f"{r.algorithm}{r.suffix}" == args.run]
-    if args.scene:
-        sel = [r for r in sel if r.trajectories == args.scene]
-    if args.label is not None:
-        sel = [r for r in sel if r.source == args.label]
+    # --algo/--scene/--label were already applied in main; only the positional
+    # run selector is left to do here.
     if not sel:
-        sys.exit(f"nothing matches '{args.run}'"
-                 + (f" in scene {args.scene}" if args.scene else "")
-                 + (f" under label '{args.label}'" if args.label is not None else ""))
+        sys.exit(f"nothing matches '{args.run}' among {len(runs)} runs "
+                 f"({describe_filters(args)})")
     check_goal(sel, goal)
 
     if args.grid:
@@ -975,6 +1006,25 @@ def main():
                         "(default: %(default)s)")
     p.add_argument("--no-archive", action="store_true",
                    help="summarize only --dir, ignoring snapshots")
+
+    def filters(sp, top=False):
+        """--algo/--scene/--label, accepted before or after the subcommand.
+
+        SUPPRESS on the subparser copies for the same reason as shared(): a
+        subparser option that was not given writes None over whatever the
+        top-level parser already put in the namespace.
+        """
+        d = {} if top else {"default": argparse.SUPPRESS}
+        sp.add_argument("--algo", metavar="A", **d,
+                        help="restrict to one algorithm: MCTS, VO-TREE, VO-PLANNER")
+        sp.add_argument("--scene", metavar="S", **d,
+                        help="restrict to one environment: sinusoidal or intention")
+        sp.add_argument("--label", metavar="L", **d,
+                        help="restrict to one snapshot (B3), or '' for the live "
+                             "folder only. Without it, every snapshot is included.")
+        return sp
+
+    filters(p, top=True)
     sub = p.add_subparsers(dest="cmd")
 
     def shared(sp):
@@ -1027,10 +1077,7 @@ def main():
     pp.add_argument("run", nargs="?", default="",
                     help="run id (VO-TREE_3) or a whole group (VO-TREE). "
                          "Omit it to draw everything.")
-    pp.add_argument("--scene", help="restrict to sinusoidal or intention")
-    pp.add_argument("--label", metavar="L",
-                    help="restrict to one snapshot (B3), or '' for the live "
-                         "folder only. Without it every snapshot is drawn.")
+    filters(pp)
     pp.add_argument("--grid", action="store_true",
                     help="draw ONLY the group sheets, no per-run images")
     pp.add_argument("--no-grid", action="store_true",
@@ -1070,6 +1117,17 @@ def main():
                 runs += discover(d, label=label)
     if not runs:
         sys.exit(1)
+
+    # Filter once, here, so the summary and the plots always agree about what
+    # "the runs" means rather than each applying its own subset.
+    n_all = len(runs)
+    runs = apply_filters(runs, args)
+    if not runs:
+        sys.exit("nothing matches " + describe_filters(args)
+                 + f" (of {n_all} runs found)")
+    if len(runs) != n_all:
+        print(f"{describe_filters(args)}: {len(runs)} of {n_all} runs")
+
     if args.cmd == "plot":
         do_plot(args, runs)
         return
