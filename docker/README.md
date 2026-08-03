@@ -15,6 +15,109 @@ docker/run.sh --build          # first time only, a few minutes
 Rebuild with the same command after changing the `Dockerfile` or
 `requirements.txt`. Nothing else needs a rebuild.
 
+## Building and running without the script
+
+`run.sh` is only a wrapper. The build it runs is:
+
+```bash
+cd ~/colcon_ws/src/MCTS_VO_ROS          # context must be the repo root,
+                                        # the Dockerfile copies
+                                        # mctsVoRos/requirements.txt
+docker build \
+    --build-arg UID="$(id -u)" \
+    --build-arg GID="$(id -g "$(id -un)")" \
+    --build-arg VIDEO_GID="$(getent group video  | cut -d: -f3)" \
+    --build-arg RENDER_GID="$(getent group render | cut -d: -f3)" \
+    -f docker/Dockerfile -t mctsvo:foxy .
+```
+
+Every argument has a default (`1000`, `1000`, `44`, `109`), so a bare
+`docker build -f docker/Dockerfile -t mctsvo:foxy .` works too — it just gives
+root-owned output files if your UID is not 1000, and no access to `/dev/dri` if
+the video and render groups differ.
+
+Running one headless experiment:
+
+```bash
+docker run --rm --init \
+    -v "$PWD:/ws/src/MCTS_VO_ROS" \
+    -w /ws/src/MCTS_VO_ROS/mctsVoRos \
+    mctsvo:foxy \
+    python3 loopHandler_copy.py --algorithm VO-TREE \
+        --trajectories intention --exp_num 0 --env-render headless
+```
+
+The mount is the only part that is not optional — the image contains no source
+and no Unity build, and the entrypoint refuses to start without it. For a
+window, add `-e DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix:ro --device /dev/dri`.
+
+### On an HPC cluster (Podman, e.g. CSCS)
+
+Podman takes the same `Dockerfile` and the same arguments. Following
+[the CSCS instructions](https://docs.cscs.ch/build-install/containers/):
+
+```bash
+# once: tell Podman to build in /dev/shm rather than $HOME
+mkdir -p "$HOME/.config/containers"
+cat > "$HOME/.config/containers/storage.conf" <<'EOF'
+[storage]
+driver = "overlay"
+runroot = "/dev/shm/$USER/runroot"
+graphroot = "/dev/shm/$USER/root"
+EOF
+```
+
+Build and import in **one allocation** — `/dev/shm` does not survive the job,
+so a build in one job cannot be imported from another:
+
+```bash
+srun --pty --partition=<partition> bash
+
+cd $SCRATCH/MCTS_VO_ROS
+podman build --network=host \
+    --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" \
+    -f docker/Dockerfile -t mctsvo:foxy .
+
+enroot import -x mount -o $SCRATCH/mctsvo.sqsh podman://mctsvo:foxy
+```
+
+Then an EDF at `$HOME/.edf/mctsvo.toml`:
+
+```toml
+image = "/capstor/scratch/cscs/<user>/mctsvo.sqsh"
+mounts = ["/capstor/scratch/cscs/<user>:/capstor/scratch/cscs/<user>"]
+workdir = "/capstor/scratch/cscs/<user>/MCTS_VO_ROS/mctsVoRos"
+entrypoint = true
+
+[env]
+NUMBA_CACHE_DIR = "/capstor/scratch/cscs/<user>/.numba"
+MPLCONFIGDIR = "/capstor/scratch/cscs/<user>/.mpl"
+```
+
+```bash
+srun --environment=mctsvo python3 loopHandler_copy.py \
+    --algorithm VO-TREE --trajectories intention --exp_num 0 \
+    --env-render headless
+```
+
+Four things differ from a workstation, and they are what will bite:
+
+- **`entrypoint = true` matters.** The container engine does not run the image
+  entrypoint unless asked, and the entrypoint is what sources ROS. Without it
+  `import rclpy` fails; the equivalent is to wrap each command in
+  `bash -c 'source /opt/ros/foxy/setup.bash && ...'`.
+- **`$HOME` inside the container is not yours.** The engine runs as your cluster
+  UID, not the image's `mctsvo` user, so `/home/mctsvo` is not writable — hence
+  the `NUMBA_CACHE_DIR` and `MPLCONFIGDIR` overrides above. Without them numba
+  recompiles every run and matplotlib complains.
+- **Headless only.** There is no display and no `/dev/dri`, so
+  `--env-render headless` is the only mode. It needs no GPU.
+- **Clone to scratch, not `$HOME`.** The repo carries ~890 MB of Unity builds,
+  and the mount in the EDF has to cover wherever you put it.
+
+Because the Unity builds are committed, a clone is all that is needed — there is
+nothing to compile on the cluster and no Unity Editor involved.
+
 ## Running things
 
 The working directory inside the container is `mctsVoRos/`, the same place you

@@ -13,8 +13,9 @@ source /opt/ros/foxy/setup.bash
 export PYTHONPATH="/ws/src/MCTS_VO_ROS/mctsVoRos:${PYTHONPATH}"
 
 if [ ! -e /ws/src/MCTS_VO_ROS/mctsVoRos/loopHandler_copy.py ]; then
-    echo "entrypoint: the repo does not appear to be mounted at" \
-         "/ws/src/MCTS_VO_ROS - start the container with docker/run.sh" >&2
+    echo "entrypoint: the repo is not mounted at /ws/src/MCTS_VO_ROS." >&2
+    echo "  docker:  add -v <repo>:/ws/src/MCTS_VO_ROS, or use docker/run.sh" >&2
+    echo "  EDF:     add the repo's parent to mounts = [...]" >&2
     exit 1
 fi
 
