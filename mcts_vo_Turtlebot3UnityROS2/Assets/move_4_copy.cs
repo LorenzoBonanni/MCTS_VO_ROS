@@ -32,19 +32,25 @@ public class move_4_copy : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        // See move_1.cs: `while` + `timer -= dt` + finishing the step before the
+        // next one is computed, so a step takes dt at any frame rate. The speed
+        // draw also moves inside the loop - it used to run once per frame, so
+        // it was re-rolled 15 times a second windowed and 4500 times a second
+        // headless, and whichever value happened to be live when the timer
+        // tripped was the one used.
         timer += Time.deltaTime;
+        while (timer >= dt){
+            timer -= dt;
+            transform.position = targetPosition;
+            startPosition = targetPosition;
 
-        if (timer >= dt){
-            // Debug.Log("Current idx: " + idx);
-
-            timer = 0f;
+            float speed = Random.Range(0.05f, 0.1f);
+            forwardSpeed = mulForwardSpeed * speed;
             // X python = Unity Z
             // Z python = Unity Y 
             // Y python = Unity -X
             Vector3 pos = transform.position;
-            startPosition = transform.position;
-            // Debug.Log("Current idx: " + idx);
-            
+
             // Trefoil knot trajectory calculation
             // float t = idx * dt * 0.01f; // Reduce the speed by scaling down t
             // int multiplier = 1;
@@ -67,19 +73,12 @@ public class move_4_copy : MonoBehaviour
 
             targetPosition = pos;
             idx += 1;
+            if (idx == period){
+                mulForwardSpeed *= -1;
+                idx = 0;
+            }
         }
-        else
-        {
-            // Interpolate the position smoothly between the start and target positions
-            float t = timer / dt;
-            transform.position = Vector3.Lerp(startPosition, targetPosition, t);
-        }
-
-        float speed = Random.Range(0.05f, 0.1f);
-        forwardSpeed = mulForwardSpeed * speed;
-        if (idx == period){
-            mulForwardSpeed *= -1;
-            idx = 0;
-        }
+        // Interpolate the position smoothly between the start and target positions
+        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / dt);
     }
 }

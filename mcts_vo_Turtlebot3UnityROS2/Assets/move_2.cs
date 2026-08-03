@@ -95,19 +95,18 @@ public class move_2 : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        // See move_1.cs: carrying the timer remainder and finishing the step
+        // before computing the next one is what makes the speed independent of
+        // the frame rate.
         timer += Time.deltaTime;
-
-        if (timer >= dt){
-            timer = 0f;
-            startPosition = transform.position;
+        while (timer >= dt)
+        {
+            timer -= dt;
+            transform.position = targetPosition;
+            startPosition = targetPosition;
             targetPosition = startPosition + next_step();
         }
-        else
-        {
-            // Interpolate the position smoothly between the start and target positions
-            float t = timer / dt;
-            transform.position = Vector3.Lerp(startPosition, targetPosition, t);
-        }
-
+        // Interpolate the position smoothly between the start and target positions
+        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / dt);
     }
 }

@@ -26,8 +26,16 @@ public class move_4_copy_int : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        // See move_1.cs: `while` + `timer -= dt` + finishing the step before the
+        // next one is computed, so that a step takes dt at any frame rate. With
+        // `if` + `timer = 0f` the obstacle ran at 0.05 m/s windowed and 0.10
+        // m/s headless, for the 0.1 m/s written below.
         timer += Time.deltaTime;
-        if (timer >= dt){
+        while (timer >= dt) {
+            timer -= dt;
+            transform.position = targetPosition;
+            startPosition = targetPosition;
+
             if (Vector3.Distance(transform.position, goal) < 0.1f){
                 if (goal == goal1){
                     goal = goal2;
@@ -41,13 +49,9 @@ public class move_4_copy_int : MonoBehaviour
                 randNum = Random.Range(-0.5f, 0.5f) * 2.5f;
             }
 
-            // Debug.Log("Current idx: " + idx);
-            timer = 0f;
             Vector3 pos = transform.position;
-            startPosition = transform.position;
-            
             float velocity = 0.1f;
-            
+
             Vector3 direction = (goal - pos).normalized;
             float goal_angle = Mathf.Atan2(direction.x, direction.z);
             float angle = goal_angle + randNum;
@@ -58,10 +62,7 @@ public class move_4_copy_int : MonoBehaviour
             targetPosition = pos;
             idx+=1;
         }
-        else {
-            // Interpolate the position smoothly between the start and target positions
-            float t = timer / dt;
-            transform.position = Vector3.Lerp(startPosition, targetPosition, t);
-        }
+        // Interpolate the position smoothly between the start and target positions
+        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / dt);
     }
 }

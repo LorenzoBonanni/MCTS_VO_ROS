@@ -27,9 +27,16 @@ public class move_copy_int : MonoBehaviour
     // Update is called once per frame
     void Update()
     {
+        // See move_1.cs: `while` + `timer -= dt` + finishing the step before the
+        // next one is computed, so that a step takes dt at any frame rate. With
+        // `if` + `timer = 0f` the obstacle ran at 0.05 m/s windowed and 0.10
+        // m/s headless, for the 0.1 m/s written below.
         timer += Time.deltaTime;
+        while (timer >= dt) {
+            timer -= dt;
+            transform.position = targetPosition;
+            startPosition = targetPosition;
 
-        if (timer >= dt){
             if (Vector3.Distance(transform.position, goal) < 0.1f){
                 if (goal == goal1){
                     goal = goal2;
@@ -39,18 +46,19 @@ public class move_copy_int : MonoBehaviour
                 }
             }
 
+            // idx was never incremented, so `idx % 10` was always 0 and the
+            // steering perturbation was re-drawn every step rather than every
+            // tenth, making this obstacle far more erratic than intended.
             if (idx % 10 == 0) {
                 randNum = Random.Range(-0.5f, 0.5f) * 1.5f;
             }
+            idx += 1;
 
-            // Debug.Log("Current idx: " + idx);
-            timer = 0f;
             // X python = Unity Z
-            // Z python = Unity Y 
+            // Z python = Unity Y
             // Y python = Unity -X
             Vector3 pos = transform.position;
-            startPosition = transform.position;
-            
+
             float velocity = 0.1f;
             Vector3 direction = (goal - pos).normalized;
             float goal_angle = Mathf.Atan2(direction.x, direction.z);
@@ -61,10 +69,7 @@ public class move_copy_int : MonoBehaviour
             pos.x = new_x;
             targetPosition = pos;
         }
-        else {
-            // Interpolate the position smoothly between the start and target positions
-            float t = timer / dt;
-            transform.position = Vector3.Lerp(startPosition, targetPosition, t);
-        }
+        // Interpolate the position smoothly between the start and target positions
+        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / dt);
     }
 }
