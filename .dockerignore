@@ -1,0 +1,18 @@
+# The build context is only ever used for requirements.txt, so keep the 888 MB
+# of Unity builds and everything else out of the daemon upload. env_build is
+# bind-mounted at run time instead - see docker/README.md.
+env_build/
+venv/
+build/
+install/
+log/
+logs/
+.git/
+mctsVoRos/debug/
+mctsVoRos/debug_archive/
+mctsVoRos/debug_plots/
+mctsVoRos/analysis/
+mctsVoRos/logs/
+mcts_vo_Turtlebot3UnityROS2/
+**/__pycache__/
+*.pyc
