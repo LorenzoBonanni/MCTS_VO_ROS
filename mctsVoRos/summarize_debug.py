@@ -491,6 +491,62 @@ def outcome_of(run):
     return "timeout"
 
 
+def _anim_job(payload):
+    """Pool worker: render one animation. Top level, so it can be pickled."""
+    path, algo, num, suffix, row, source, goal, out, fps, stride = payload
+    run = Run(path, algo, num, suffix, row, source)
+    try:
+        return out if plot_run(run, goal, out, animate=True,
+                               fps=fps, stride=stride) else None
+    except Exception as exc:                      # one bad run must not stop 59 others
+        warn(f"{algo}_{num}{suffix}: animation failed: {exc}")
+        return None
+
+
+def render_animations(tasks, goal, fps=10, stride=1, jobs=1):
+    """Render many animations, fanning out across cores.
+
+    Runs are independent and matplotlib keeps no state between them, so this is
+    a straight parallel map. It gets the cores because it is where essentially
+    all the wall time of a campaign goes - the stills are seconds, these are
+    minutes. Runs are re-created from their path in the worker rather than
+    pickled with their loaded pickles attached, which would send tens of MB.
+    """
+    payloads = [(r.path, r.algorithm, r.exp_num, r.suffix, r.row, r.source,
+                 goal, out, fps, stride) for r, out in tasks]
+    total = len(payloads)
+    written = []
+
+    def note(i, got):
+        # <scene>/<outcome>/<file>: enough to place it, short enough to read,
+        # and free of the ../../.. an absolute archive path would produce.
+        label = os.sep.join(got.rsplit(os.sep, 3)[-3:]) if got else "skipped"
+        print(f"  [{i}/{total}] {label}", flush=True)
+
+    if jobs <= 1:
+        for i, p in enumerate(payloads, 1):
+            got = _anim_job(p)
+            note(i, got)
+            if got:
+                written.append(got)
+        return written
+
+    import multiprocessing as mp
+    pool = mp.get_context("fork").Pool(jobs)
+    try:
+        for i, got in enumerate(pool.imap_unordered(_anim_job, payloads), 1):
+            note(i, got)
+            if got:
+                written.append(got)
+        pool.close()
+    except KeyboardInterrupt:
+        pool.terminate()
+        warn("interrupted; the stills are complete, the animations are partial")
+    finally:
+        pool.join()
+    return written
+
+
 def plot_dir(base, run, outcome=None, flat=False):
     """<base>/[<snapshot>/]<algorithm>/<environment>/<outcome>/
 
@@ -532,7 +588,69 @@ def check_goal(runs, goal):
              f"{len(ends)} successful runs actually stopped - wrong --goal?")
 
 
-def plot_run(run, goal, out, animate=False, fps=10):
+def _animate(plt, plot_robot, run, goal, cfg, trj, obs, n, out, fps, stride):
+    """Frame-by-frame animation, drawing the same picture as plot_frame2.
+
+    plot_frame2 calls ax.clear() and rebuilds every artist each frame - the
+    circles, the path, the axis limits - which costs ~43 ms per frame and is
+    nearly all of the run time. Here the artists are created once and only
+    their data is updated, which is the same picture for a fraction of the
+    work. The obstacle patches come from a pool sized to the busiest frame,
+    since the detected-obstacle count varies from step to step.
+    """
+    from matplotlib.animation import FuncAnimation
+
+    idx = list(range(0, n, stride))
+    # obs_ is optional; an archive without it still animates the path.
+    empty = (np.empty((0, 4)), np.empty(0))
+    frames_obs = obs if obs is not None else [empty] * n
+
+    fig, ax = plt.subplots()
+    ax.set_aspect("equal", adjustable="box")
+    ax.set_xlim(-4, 2)
+    ax.set_ylim(-4, 2)
+    # Created in plot_frame2's order. Within one z-order matplotlib draws in
+    # creation order, so the marker has to precede the heading line or the two
+    # swap where they overlap at the robot's centre - the one visible way this
+    # could differ from the renderer it replaces.
+    (mark,) = ax.plot([], [], "xr")
+    ax.plot(goal[0], goal[1], "xb")               # static, drawn once
+
+    pool_n = max((len(frames_obs[i][0]) for i in idx), default=0)
+    pool = [plt.Circle((0, 0), 0.0, color="k", visible=False) for _ in range(pool_n)]
+    for c in pool:
+        ax.add_patch(c)
+    body = plt.Circle((0, 0), cfg.robot_radius, color="b")
+    ax.add_patch(body)
+    (heading,) = ax.plot([], [], "-k")
+    (path,) = ax.plot([], [], "--r")
+
+    def update(i):
+        x = trj[i]
+        ox = np.asarray(frames_obs[i][0], dtype=float)
+        orad = np.asarray(frames_obs[i][1], dtype=float)
+        for k, c in enumerate(pool):
+            if k < len(ox):
+                c.set_center((ox[k, 0], ox[k, 1]))
+                c.set_radius(float(orad[k]))
+                c.set_visible(True)
+            else:
+                c.set_visible(False)
+        body.set_center((x[0], x[1]))
+        heading.set_data([x[0], x[0] + np.cos(x[2]) * cfg.robot_radius],
+                         [x[1], x[1] + np.sin(x[2]) * cfg.robot_radius])
+        mark.set_data([x[0]], [x[1]])
+        path.set_data(trj[:i, 0], trj[:i, 1])
+        return pool + [body, heading, mark, path]
+
+    ani = FuncAnimation(fig, update, frames=idx, save_count=None,
+                        cache_frame_data=False)
+    ani.save(out, fps=fps)
+    plt.close(fig)
+    return out
+
+
+def plot_run(run, goal, out, animate=False, fps=10, stride=1):
     """Render one run: either a still overview or the frame-by-frame animation."""
     plt, plot_frame2, plot_robot = _plot_setup()
 
@@ -549,24 +667,8 @@ def plot_run(run, goal, out, animate=False, fps=10):
     n = len(trj) if obs is None else min(len(trj), len(obs))
 
     if animate:
-        from matplotlib.animation import FuncAnimation
-        fig, ax = plt.subplots()
-        # plot_frame2 indexes points_list per frame; the raw LIDAR points are
-        # not persisted by save_data, so pass an empty set per frame. Everything
-        # else it draws - robot, goal, detected obstacles, path - is on disk.
-        empty_points = [()] * n
-        # plot_frame2 unpacks obs[i] per frame, so an archive without obs_ needs
-        # an empty pair per frame rather than None - same tolerance the still
-        # plot has, and it keeps the path visible when the perception is gone.
-        frames_obs = obs if obs is not None else [(np.empty((0, 4)), np.empty(0))] * n
-        ani = FuncAnimation(
-            fig, plot_frame2,
-            fargs=(goal, cfg, frames_obs, trj, ax,
-                   (np.empty((0, 4)), np.empty(0)), empty_points),
-            frames=range(n), save_count=None, cache_frame_data=False)
-        ani.save(out, fps=fps)
-        plt.close(fig)
-        return out
+        return _animate(plt, plot_robot, run, goal, cfg, trj, obs, n,
+                        out, fps, stride)
 
     # Still overview: the whole run in one image, which is what you want when
     # skimming thirty of them.
@@ -644,9 +746,12 @@ def do_plot(args, runs):
            or f"{r.algorithm}{r.suffix}" == args.run]
     if args.scene:
         sel = [r for r in sel if r.trajectories == args.scene]
+    if args.label is not None:
+        sel = [r for r in sel if r.source == args.label]
     if not sel:
         sys.exit(f"nothing matches '{args.run}'"
-                 + (f" in scene {args.scene}" if args.scene else ""))
+                 + (f" in scene {args.scene}" if args.scene else "")
+                 + (f" under label '{args.label}'" if args.label is not None else ""))
     check_goal(sel, goal)
 
     if args.grid:
@@ -666,10 +771,13 @@ def do_plot(args, runs):
     if args.limit:
         ordered = ordered[:args.limit]
     if args.anim and len(ordered) > 20:
-        # ~0.04 s per simulation step, measured over runs of 122 and 335 steps.
-        secs = sum(float(r.get("nSteps", 200) or 200) for r in ordered) * 0.04
-        warn(f"{len(ordered)} animations, roughly {secs / 60:.0f} min; "
-             f"--limit caps it and Ctrl-C is safe (stills are already written)")
+        # ~0.026 s per step per core, measured on a 158-step run after the
+        # artist-reuse rewrite; --jobs divides it.
+        secs = (sum(float(r.get("nSteps", 200) or 200) for r in ordered)
+                * 0.026 / max(1, args.jobs) / max(1, args.stride))
+        warn(f"{len(ordered)} animations on {args.jobs} core(s), roughly "
+             f"{secs / 60:.0f} min; --limit caps it and Ctrl-C is safe "
+             f"(stills are already written)")
 
     # Two passes, not one interleaved pass: the stills take seconds for a whole
     # campaign and the animations take tens of minutes, so finishing every still
@@ -684,14 +792,14 @@ def do_plot(args, runs):
             written[d] += 1
 
     if args.anim:
-        for i, (r, d, stem) in enumerate(stems, 1):
-            # Progress matters here: a silent process for half an hour is
-            # indistinguishable from a hung one.
-            print(f"  [{i}/{len(stems)}] animating "
-                  f"{r.algorithm}_{r.exp_num}{r.suffix} ({r.trajectories})...",
-                  flush=True)
-            if plot_run(r, goal, stem + ".gif", animate=True, fps=args.fps):
-                written[d] += 1
+        # Progress matters here: a silent process for half an hour is
+        # indistinguishable from a hung one.
+        by_out = {stem + args.format: d for _, d, stem in stems}
+        got = render_animations([(r, stem + args.format) for r, _, stem in stems],
+                                goal, fps=args.fps, stride=args.stride,
+                                jobs=args.jobs)
+        for o in got:
+            written[by_out[o]] += 1
 
     # The grid is part of "draw this group", so it comes along automatically
     # rather than needing a second command with --grid.
@@ -722,13 +830,18 @@ def _human(nbytes):
 
 
 def snapshot(src, label, archive, force=False, keep=False,
-             animations=False, goal=DEFAULT_GOAL, make_plots=True):
+             animations=False, goal=DEFAULT_GOAL, make_plots=True,
+             fps=10, stride=1, jobs=1, fmt=".gif"):
     """Freeze a debug folder under a label, then clear the original.
 
-    The order is deliberate: copy everything, verify every copy against its
-    source, draw the plots, and only then delete - and delete *only* the files
-    that were verified into the archive. Anything not archived (the animations,
-    unless asked for) stays where it is rather than being quietly lost.
+    The order is deliberate: copy the run data, verify every copy against its
+    source, draw the plots and animations into the archive, and only then
+    delete - and delete *only* the files that were verified into the archive.
+
+    The simulator's own per-run animations under debug/<scene>/animations/ are
+    neither copied nor deleted: the archive's pictures are the ones this script
+    renders, which match its stills and its outcome foldering. The originals
+    stay where they are rather than being quietly lost.
     """
     dest = os.path.join(archive, label)
     if os.path.exists(dest):
@@ -741,12 +854,14 @@ def snapshot(src, label, archive, force=False, keep=False,
     copied = []          # (source, destination) pairs that verified
     for dirpath, dirnames, files in os.walk(src):
         rel = os.path.relpath(dirpath, src)
-        if not animations and os.path.basename(dirpath) == ANIMATION_DIR:
+        # The simulator's own animations are not run data and are not what the
+        # archive shows; skip the directory outright so they are never copied
+        # and, since only copied files are deleted, never removed either.
+        if os.path.basename(dirpath) == ANIMATION_DIR:
             dirnames[:] = []
             continue
-        in_anim = ANIMATION_DIR in rel.split(os.sep)
         for f in files:
-            if not in_anim and not f.startswith(SNAPSHOT_PREFIXES):
+            if not f.startswith(SNAPSHOT_PREFIXES):
                 continue
             out = os.path.join(dest, rel) if rel != "." else dest
             os.makedirs(out, exist_ok=True)
@@ -765,7 +880,8 @@ def snapshot(src, label, archive, force=False, keep=False,
         runs = discover(dest, label=label)
         if runs:
             print("drawing plots into the archive...")
-            n = plot_archive(runs, dest, goal)
+            n = plot_archive(runs, dest, goal, animate=animations, fps=fps,
+                             stride=stride, jobs=jobs, fmt=fmt)
             print(f"  {n} image(s) -> {os.path.join(dest, 'plots')}")
 
     if keep:
@@ -784,16 +900,29 @@ def snapshot(src, label, archive, force=False, keep=False,
           + (f"; {left} file(s) left behind (not archived)" if left else ""))
 
 
-def plot_archive(runs, dest, goal):
-    """Draw every archived run into <archive>/<label>/plots/."""
+def plot_archive(runs, dest, goal, animate=False, fps=10, stride=1, jobs=1,
+                 fmt=".gif"):
+    """Draw every archived run into <archive>/<label>/plots/.
+
+    Stills first, then animations, so an interrupted snapshot still leaves a
+    complete set of overviews. The animations rendered here are the archive's
+    own - the per-run ones the simulator drops in debug/<scene>/animations/ are
+    a different picture and are deliberately not copied.
+    """
     base = os.path.join(dest, "plots")
     n = 0
+    tasks = []
     for r in runs:
         d = plot_dir(base, r, outcome_of(r), flat=True)
         os.makedirs(d, exist_ok=True)
-        out = os.path.join(d, f"{r.algorithm}_{r.exp_num}{r.suffix}.png")
-        if plot_run(r, goal, out):
+        stem = os.path.join(d, f"{r.algorithm}_{r.exp_num}{r.suffix}")
+        if plot_run(r, goal, stem + ".png"):
             n += 1
+        tasks.append((r, stem + fmt))
+    if animate:
+        print(f"rendering {len(tasks)} animations on {jobs} core(s)...")
+        n += len(render_animations(tasks, goal, fps=fps, stride=stride,
+                                   jobs=jobs))
     by = defaultdict(list)
     for r in runs:
         by[plot_dir(base, r, flat=True)].append(r)
@@ -861,6 +990,21 @@ def main():
                         default=argparse.SUPPRESS)
         return sp
 
+    def anim_opts(sp):
+        """Options shared by the two commands that can render animations."""
+        sp.add_argument("--jobs", "-j", type=int, default=min(8, os.cpu_count() or 1),
+                        metavar="N",
+                        help="render N animations at once; they are independent, "
+                             "so this scales nearly linearly (default: %(default)s)")
+        sp.add_argument("--stride", type=int, default=1, metavar="N",
+                        help="animate every Nth step - halve the frames, halve "
+                             "the time (default: %(default)s)")
+        sp.add_argument("--fps", type=int, default=10)
+        sp.add_argument("--format", choices=[".gif", ".mp4"], default=".gif",
+                        help="mp4 is ~25%% faster to write and ~5x smaller, but "
+                             "needs a player (default: %(default)s)")
+        return sp
+
     sp = sub.add_parser("snapshot",
                         help="archive a debug folder under a label, plot it, "
                              "and clear the original")
@@ -870,13 +1014,13 @@ def main():
     sp.add_argument("--keep", action="store_true",
                     help="copy instead of move: leave the debug folder as it is")
     sp.add_argument("--with-animations", action="store_true",
-                    help="archive the rendered GIFs and MP4s too. They are "
-                         "~80%% of the folder and regenerable, so they are "
-                         "normally left in place rather than copied")
+                    help="also render an animation per run into the archive's "
+                         "plots/ tree, alongside the stills. Slow: see --jobs")
     sp.add_argument("--no-plots", action="store_true",
                     help="archive without drawing the plots")
     sp.add_argument("--goal", type=float, nargs=2, default=list(DEFAULT_GOAL),
                     metavar=("X", "Y"))
+    anim_opts(sp)
     shared(sp)
 
     pp = sub.add_parser("plot", help="draw what the robot saw and where it went")
@@ -884,16 +1028,18 @@ def main():
                     help="run id (VO-TREE_3) or a whole group (VO-TREE). "
                          "Omit it to draw everything.")
     pp.add_argument("--scene", help="restrict to sinusoidal or intention")
+    pp.add_argument("--label", metavar="L",
+                    help="restrict to one snapshot (B3), or '' for the live "
+                         "folder only. Without it every snapshot is drawn.")
     pp.add_argument("--grid", action="store_true",
                     help="draw ONLY the group sheets, no per-run images")
     pp.add_argument("--no-grid", action="store_true",
                     help="skip the group sheets")
     pp.add_argument("--anim", action="store_true",
-                    help="also write animations, using the project's "
-                         "plot_frame2. Measured at about 0.04 s per simulation "
-                         "step, so 6-15 s per run and roughly half an hour for "
-                         "a full 180-run campaign, against 15 s for the stills.")
-    pp.add_argument("--fps", type=int, default=10)
+                    help="also write animations. About 0.026 s per simulation "
+                         "step per core, so 4 s for a 160-step run; --jobs "
+                         "divides a campaign across cores.")
+    anim_opts(pp)
     pp.add_argument("--limit", type=int, default=0,
                     help="cap how many runs are drawn (0 = all). Worth setting "
                          "with --anim, which takes seconds per run rather than "
@@ -909,7 +1055,9 @@ def main():
     if args.cmd == "snapshot":
         snapshot(args.dir, args.label, args.archive, force=args.force,
                  keep=args.keep, animations=args.with_animations,
-                 goal=tuple(args.goal), make_plots=not args.no_plots)
+                 goal=tuple(args.goal), make_plots=not args.no_plots,
+                 fps=args.fps, stride=args.stride, jobs=args.jobs,
+                 fmt=args.format)
         return
 
     runs = discover(args.dir)
