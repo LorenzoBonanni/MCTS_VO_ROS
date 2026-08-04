@@ -1,0 +1,3 @@
+[submodule "mctsVoRos/MCTS_VO"]
+	path = mctsVoRos/MCTS_VO
+	url = https://github.com/Isla-lab/MCTS_VO.git
