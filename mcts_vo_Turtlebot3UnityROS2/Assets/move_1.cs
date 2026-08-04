@@ -42,8 +42,10 @@ public class move_1 : MonoBehaviour
     {
         Random.InitState(42);
         // A step is velocity * dt in some direction, so the longest one is
-        // MaxVelocity * dt.
-        stepPeriod = ObstacleSpeed.PeriodFor(MaxVelocity * dt);
+        // MaxVelocity * dt. Passing MaxVelocity as the peak keeps this
+        // obstacle at its own pace instead of the scene-wide one: it is one of
+        // the fast pair, uniform on (0.10, 0.15) m/s at scale 1.
+        stepPeriod = ObstacleSpeed.PeriodFor(MaxVelocity * dt, MaxVelocity);
         startPosition = transform.position;
         targetPosition = transform.position;
     }

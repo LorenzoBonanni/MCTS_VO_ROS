@@ -37,7 +37,9 @@ public class move_2 : MonoBehaviour
     void Start()
     {
         Random.InitState(42);
-        stepPeriod = ObstacleSpeed.PeriodFor(MaxVelocity * dt);
+        // See move_1.cs: the fast pair keeps its own peak, uniform on
+        // (0.10, 0.15) m/s at scale 1, rather than the scene-wide 0.1.
+        stepPeriod = ObstacleSpeed.PeriodFor(MaxVelocity * dt, MaxVelocity);
         startPosition = transform.position;
         targetPosition = transform.position;
     }

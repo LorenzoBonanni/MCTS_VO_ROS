@@ -80,7 +80,24 @@ public static class ObstacleSpeed
     // TargetMaxSpeed * Scale.
     public static float PeriodFor(float maxStepDistance)
     {
-        return maxStepDistance / (TargetMaxSpeed * Scale);
+        return PeriodFor(maxStepDistance, TargetMaxSpeed);
+    }
+
+    // The same, for an obstacle that is deliberately not held to
+    // TargetMaxSpeed. move_1 and move_2 are the fast pair of the complex
+    // scenes and are meant to be quicker than everything else, so they pass
+    // their own peak and keep the Random.Range(0.10, 0.15) draw intact,
+    // uniform on (0.10 * Scale, 0.15 * Scale) rather than squeezed into
+    // (0.067 * Scale, 0.1 * Scale).
+    //
+    // Passing peakSpeed equal to the obstacle's own maximum speed leaves the
+    // period at dt and the motion at its native pace, scaled by Scale alone.
+    // Anything that does this widens the scene maximum, so SCENE_MAX_OBS_VEL
+    // in loopHandler_copy.py has to know which builds contain such an
+    // obstacle - it is keyed by --env-build for exactly this reason.
+    public static float PeriodFor(float maxStepDistance, float peakSpeed)
+    {
+        return maxStepDistance / (peakSpeed * Scale);
     }
 
     private static float Parse()

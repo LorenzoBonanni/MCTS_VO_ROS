@@ -16,6 +16,7 @@ the experiments. See [Installation](#installation).
   intention-based one. Select with `--env-build`:
   - `*_env_fixed/`: current builds — frame-rate-independent obstacle motion,
     peak speed normalised to 0.1 m/s, sensors at 50 Hz (the default)
+  - `*_env_complex/`: the same, with four moving obstacles instead of two
   - `*_env/`, `*_env_50hz/`: pre-fix builds, kept so earlier results stay reproducible
 - `mctsVoRos/`: Contains the Python implementation of the algorithms and experiment runner
   - `summarize_debug.py`: reads the results and prints them as tables; see
@@ -220,14 +221,48 @@ than how much of it:
 | Option | Effect |
 | --- | --- |
 | `--obs-speed-scale K` | multiplies the speed of every obstacle in either scene (default 1) |
-| `--env-build {fixed,orig,50hz}` | which simulator build to launch |
+| `--env-build {fixed,complex,orig,50hz}` | which simulator build to launch |
 | `--env-render {window,headless}` | whether the simulator draws a window |
+
+### How many obstacles move
+
+Each scene contains four obstacles carrying movement scripts, but two of them —
+`Obstacle_7_MOVING` and `Obstacle_8_MOVING` — are serialised inactive in the
+shipped scenes, so only two ever moved. `--env-build complex` selects builds of
+the same scenes with those two switched on:
+
+```bash
+python3 loopHandler_copy.py --algorithm VO-TREE --trajectories sinusoidal --env-build complex
+```
+
+The added pair is **the fast one**. `Obstacle_7/8_MOVING` keep their own
+`Random.Range(0.10, 0.15)` draw rather than being held to the scene-wide 0.1, so
+they are uniform on `0.10 × K` to `0.15 × K` m/s while the original two stay at a
+`0.1 × K` peak. That raises the maximum obstacle speed of the build, and
+`--max-obs-vel` follows it automatically — `0.10 × K` for `fixed`, `0.15 × K` for
+`complex`. `--obs-speed-scale` applies as before.
+
+The two original obstacles do **not** retrace their `fixed` trajectories exactly,
+though. Each movement script calls `Random.InitState(42)` in `Start()`, and Unity's
+`Random` is a single global generator, so adding two more scripts changes both the
+number of re-seeds and the interleaving of the draws. Measured against the `fixed`
+build, `Obstacle_9_MOVING` deviates by up to 4.5 cm and `Obstacle_10_MOVING` by
+1 cm — the same motion statistically, a different realisation of it. Treat
+`complex` as a distinct environment rather than as `fixed` plus two obstacles.
+It is recorded per run as `envBuild`, so the two are told apart afterwards and
+should not be averaged together.
 
 ### Obstacle speed
 
-Both scenes are normalised so that every obstacle peaks at exactly `0.1 * K` m/s,
-and `--max-obs-vel` — the speed the velocity obstacles are sized for — is derived
-from the same number, so the planner and the simulator cannot disagree:
+Obstacle speeds are normalised, so a build has one peak speed and both of its
+scenes share it. `--max-obs-vel` — the speed the velocity obstacles are sized for
+— is derived from that peak, so the planner and the simulator cannot disagree:
+
+| `--env-build` | peak obstacle speed | derived `--max-obs-vel` |
+| --- | --- | --- |
+| `fixed` | `0.1 × K` | `0.1 × K` |
+| `complex` | `0.15 × K` (the added fast pair) | `0.15 × K` |
+
 
 ```bash
 python3 loopHandler_copy.py --algorithm VO-TREE --trajectories sinusoidal --obs-speed-scale 1.5
@@ -284,7 +319,9 @@ only with the native install; the Docker route never creates them.
 │   ├── sin_env_50hz/
 │   ├── int_env_50hz/
 │   ├── sin_env_fixed/      # current builds, used by default
-│   └── int_env_fixed/
+│   ├── int_env_fixed/
+│   ├── sin_env_complex/    # same, with four moving obstacles
+│   └── int_env_complex/
 ├── mctsVoRos/
 │   ├── MCTS_VO/
 │   │   ├── bettergym/

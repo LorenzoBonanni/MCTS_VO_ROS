@@ -48,7 +48,10 @@ parser.add_argument('--obs-speed-scale', default=1.0, type=float,
                          'paths are geometrically identical and only the clock '
                          'they are walked on changes, and the shape of every '
                          'speed distribution is preserved rather than '
-                         'truncated. Both scenes peak at exactly 0.1*k m/s. '
+                         'truncated - move_1/move_2 stay uniform on '
+                         '(0.10k, 0.15k). Both scenes of --env-build fixed peak '
+                         'at 0.1*k m/s, and of complex at 0.15*k, that being '
+                         'the fast pair those scenes add. '
                          'Needs a build from 2026-08-04 or later; older ones '
                          'ignore the argument, which is why it is recorded per '
                          'run. The robot tops out at 0.3 m/s, so past k = 3 it '
@@ -60,8 +63,9 @@ parser.add_argument('--max-obs-vel', default=None, type=float,
                     help='Maximum obstacle speed the velocity obstacles are '
                          'sized for. This MUST be >= the fastest obstacle in '
                          'the scene or the safety guarantee does not hold. '
-                         'Left unset it is derived as SCENE_MAX_OBS_VEL * '
-                         '--obs-speed-scale, i.e. 0.10*k in both scenes, which '
+                         'Left unset it is derived as '
+                         'SCENE_MAX_OBS_VEL[--env-build] * --obs-speed-scale, '
+                         'i.e. 0.10*k for fixed and 0.15*k for complex, which '
                          'is what keeps the planner and the simulator '
                          'consistent. Pass 0.15 to reproduce runs recorded '
                          'before the peaks were normalised; overriding it '
@@ -74,17 +78,27 @@ parser.add_argument('--exploration-c', default=1.0, type=float,
                          'close to random. Values around 1 or below make it '
                          'discriminate.')
 parser.add_argument('--env-build', default='fixed',
-                    choices=['fixed', 'orig', '50hz'],
+                    choices=['fixed', 'complex', 'orig', '50hz'],
                     help='Which Unity build to launch. It matters: the movement '
                          'scripts used to step on the frame clock, so obstacle '
                          'speed depended on the render mode - 0.050 m/s '
                          'windowed against 0.101 m/s headless, for a scripted '
                          '0.100. "fixed" carries the corrected scripts and '
                          'measures 0.099/0.102 across a 290x range of frame '
-                         'rates. "orig" is the pre-fix 7.5 Hz build the '
-                         'published results were produced with, i.e. obstacles '
-                         'at roughly half speed; "50hz" is the pre-fix build at '
-                         '50 Hz. Recorded in the output CSV as envBuild.')
+                         'rates. "complex" is the same simulator with twice the '
+                         'moving obstacles: Obstacle_7/8_MOVING (move_1 and '
+                         'move_2) are serialised inactive in the shipped scenes '
+                         'and never ran, and the complex scenes switch them on, '
+                         'so four obstacles move instead of two. Same peak '
+                         'speed and same scripts, but NOT fixed-plus-two: every '
+                         'script seeds the one global Unity RNG in Start, so '
+                         'two more consumers shift the draws the original pair '
+                         'sees and they deviate by up to 4.5 cm. A distinct '
+                         'environment, not a superset. "orig" is the '
+                         'pre-fix 7.5 Hz build the published results were '
+                         'produced with, i.e. obstacles at roughly half speed; '
+                         '"50hz" is the pre-fix build at 50 Hz. Recorded in the '
+                         'output CSV as envBuild.')
 parser.add_argument('--env-render', default='window',
                     choices=['window', 'headless'],
                     help='Whether the Unity build renders a window. With the '
@@ -100,6 +114,14 @@ ENV_BUILDS = {
     'fixed': {
         'sinusoidal': '../env_build/sin_env_fixed/env.x86_64',
         'intention': '../env_build/int_env_fixed/env.x86_64',
+    },
+    # Built from turtlebot3_COPY_COMPLEX and turtlebot3_COPY_INT_COMPLEX, which
+    # are the shipped scenes with Obstacle_7/8_MOVING activated. Kept as
+    # separate scenes rather than a runtime toggle so the two-obstacle builds
+    # stay reproducible from the scene files they were built from.
+    'complex': {
+        'sinusoidal': '../env_build/sin_env_complex/env.x86_64',
+        'intention': '../env_build/int_env_complex/env.x86_64',
     },
     'orig': {
         'sinusoidal': '../env_build/sin_env/env.x86_64',
@@ -119,22 +141,33 @@ ENV_RENDER_ARGS_BY_MODE = {
     'headless': ['-batchmode', '-nographics'],
 }
 
-# Peak obstacle speed in either scene at --obs-speed-scale 1. One number for
-# both, because ObstacleSpeed.TargetMaxSpeed normalises them to it: every
-# movement script asks for the step period that puts its own longest step at
-# this speed. Keep the two in step - this is the value the velocity obstacles
-# are sized from.
+# Peak obstacle speed at --obs-speed-scale 1, per build. This is the value the
+# velocity obstacles are sized from, so it has to bound every obstacle that
+# actually moves in the build being launched.
 #
-# It was not always one number. Only two obstacles move in either scene
-# (Obstacle_9/10_MOVING; the move_1 and move_2 pair on Obstacle_7/8_MOVING is
-# serialised m_IsActive: 0 in both scenes and never runs), and before the
-# normalisation they were measured at 0.1001 in the intention scene but 0.5078
-# in the sinusoidal one. The sinusoidal pair adds its lateral term as a bare
-# per-step displacement, `pos.z += offset`, with no dt, so it moved at
-# amplitude/dt = 0.05/0.1 = 0.5 m/s sideways while its forward term ran at the
-# intended 0.1. Normalising the period rather than dividing that term by dt is
-# what keeps the trajectory identical while capping the speed.
-SCENE_MAX_OBS_VEL = 0.10
+# It is the same for both scenes of a given build, because
+# ObstacleSpeed.TargetMaxSpeed normalises them: every movement script asks for
+# the step period that puts its own longest step at that speed. It is not the
+# same across builds, because the complex scenes activate move_1 and move_2,
+# and that pair deliberately opts out of the normalisation - they are the fast
+# obstacles, and they keep their native Random.Range(0.10, 0.15) draw, uniform
+# on (0.10, 0.15) m/s rather than squeezed to (0.067, 0.1).
+#
+#   fixed     Obstacle_9/10_MOVING only, all normalised     0.10
+#   complex   the above plus Obstacle_7/8_MOVING at 0.15    0.15
+#
+# orig and 50hz predate all of this. They carry the un-normalised lateral term
+# (`pos.z += offset` with no dt, which ran at amplitude/dt = 0.5 m/s in the
+# sinusoidal scene) and their obstacle speed depends on the frame rate, so no
+# single number describes them. 0.15 is what the code used historically and is
+# kept so those builds reproduce the results they produced - it is NOT a
+# verified bound for them, and VO may be undersized there.
+SCENE_MAX_OBS_VEL = {
+    'fixed': 0.10,
+    'complex': 0.15,
+    'orig': 0.15,
+    '50hz': 0.15,
+}
 
 # Root directory of every artifact produced by the experiments
 DEBUG_DIR = 'debug'
@@ -162,12 +195,19 @@ ENV_RENDER_ARGS = ENV_RENDER_ARGS_BY_MODE[cli_args.env_render]
 OBS_SPEED_SCALE = cli_args.obs_speed_scale
 if OBS_SPEED_SCALE <= 0:
     parser.error('--obs-speed-scale must be positive')
+# orig and 50hz predate ObstacleSpeed and discard the argument, so asking them
+# for a scale produces a run that looks scaled in the CSV and is not. Refuse it
+# rather than record a value the simulator ignored.
+if OBS_SPEED_SCALE != 1.0 and cli_args.env_build in ('orig', '50hz'):
+    parser.error(f'--obs-speed-scale {OBS_SPEED_SCALE:g} needs a build that '
+                 f'honours it; --env-build {cli_args.env_build} predates the '
+                 f'argument and would ignore it. Use fixed or complex.')
 ENV_SPEED_ARGS = ['-obsSpeedScale', f'{OBS_SPEED_SCALE:g}']
 
 # Derived, not defaulted, so the velocity obstacles are always sized for the
 # scene that is actually running. Sizing them for less than the true maximum
 # does not degrade the planner gracefully, it voids the guarantee outright.
-TRUE_MAX_OBS_VEL = SCENE_MAX_OBS_VEL * OBS_SPEED_SCALE
+TRUE_MAX_OBS_VEL = SCENE_MAX_OBS_VEL[cli_args.env_build] * OBS_SPEED_SCALE
 if cli_args.max_obs_vel is None:
     cli_args.max_obs_vel = TRUE_MAX_OBS_VEL
 elif cli_args.max_obs_vel < TRUE_MAX_OBS_VEL:
