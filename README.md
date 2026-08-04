@@ -6,14 +6,69 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
 - ROS2 Foxy
 - Unity
 
+Those are the versions the code needs, not the versions your machine needs: the
+supplied Docker image provides all of them, so any Linux host with Docker can run
+the experiments. See [Installation](#installation).
+
 ## Repository Structure
-- `env_build/`: Contains the compiled Unity environments
-  - `sin_env/`: Sinusoidal obstacle trajectories environment
-  - `int_env/`: Intention-based obstacle trajectories environment
+- `env_build/`: Contains the compiled Unity environments, one pair per variant.
+  `sin_env*` is the sinusoidal obstacle trajectories environment, `int_env*` the
+  intention-based one. Select with `--env-build`:
+  - `*_env_fixed/`: current builds — frame-rate-independent obstacle motion,
+    peak speed normalised to 0.1 m/s, sensors at 50 Hz (the default)
+  - `*_env/`, `*_env_50hz/`: pre-fix builds, kept so earlier results stay reproducible
 - `mctsVoRos/`: Contains the Python implementation of the algorithms and experiment runner
+  - `summarize_debug.py`: reads the results and prints them as tables; see
+    [`SUMMARIZE_README.md`](mctsVoRos/SUMMARIZE_README.md)
 - `mcts_vo_Turtlebot3UnityROS2/`: Unity project implementing the simulation environment
 
 ## Installation
+
+Two ways in. **Docker is the recommended one** — it needs neither Ubuntu 20.04 nor
+a system ROS 2, so it works on any Linux with Docker installed, and it is the only
+route that does not depend on the host having the exact versions above. Install
+natively only if you want to develop against a system ROS 2 you already run.
+
+### Option 1: Docker (recommended)
+
+```bash
+git clone --recurse-submodules https://github.com/LorenzoBonanni/MCTS_VO_ROS.git
+cd MCTS_VO_ROS
+docker/run.sh --build
+```
+
+That is the whole setup. `--recurse-submodules` fetches the planner
+(`mctsVoRos/MCTS_VO`) at the right commit, the Unity environments are already in
+the repo so nothing is compiled, and `--build` produces the image once.
+
+The image holds only ROS 2 Foxy, Python 3.8 and the pinned packages. **The source
+is bind-mounted, not baked in**, so editing code or switching between the tagged
+fixes needs no rebuild — rebuild only after changing `docker/Dockerfile` or
+`mctsVoRos/requirements.txt`. Run anything through the wrapper:
+
+```bash
+docker/run.sh python3 loopHandler_copy.py --algorithm VO-TREE --trajectories intention
+docker/run.sh ./run_all_experiments.sh -n 30 --skip-setup
+docker/run.sh python3 summarize_debug.py
+docker/run.sh                                    # interactive shell
+```
+
+The working directory inside the container is `mctsVoRos/`, so every command below
+works unchanged with `docker/run.sh` in front of it. `--skip-setup` is required for
+the campaign script: without it the script sources ROS, runs `colcon build` and
+activates `venv/`, none of which exist in the container. Results land on the host,
+owned by you, in `mctsVoRos/debug/`.
+
+If `docker` reports a permission error on `/var/run/docker.sock`, your login session
+predates your `docker` group membership — log out and back in, or prefix commands
+with `sg docker -c "..."`.
+
+See [`docker/README.md`](docker/README.md) for the container details: building
+without the wrapper, Podman and HPC clusters, render modes, and parallel runs.
+
+### Option 2: Native install
+
+Needs Ubuntu 20.04, Python 3.8 and ROS 2 Foxy already installed.
 
 1. Install system dependencies:
    ```bash
@@ -23,26 +78,14 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
 
 2. Clone this repository into your colcon workspace:
    ```bash
-   git clone https://github.com/LorenzoBonanni/MCTS_VO_ROS.git ~/colcon_ws/src/MCTS_VO_ROS
+   git clone --recurse-submodules https://github.com/LorenzoBonanni/MCTS_VO_ROS.git ~/colcon_ws/src/MCTS_VO_ROS
+   cd ~/colcon_ws/src/MCTS_VO_ROS
    ```
+   `--recurse-submodules` populates `mctsVoRos/MCTS_VO` at the commit this
+   revision expects. If you already cloned without it, run
+   `git submodule update --init` rather than cloning the planner by hand.
 
-3. Navigate to the project directory:
-   ```bash
-   cd ~/colcon_ws/src/MCTS_VO_ROS/mctsVoRos
-   ```
-
-4. Remove the existing MCTS_VO directory and clone the ROS branch:
-   ```bash
-   rm -rf MCTS_VO
-   git clone -b ros https://github.com/Isla-lab/MCTS_VO.git
-   ```
-
-5. Return to the main project directory:
-   ```bash
-   cd ..
-   ```
-
-6. Create and activate a Python virtual environment:
+3. Create and activate a Python virtual environment:
    ```bash
    python3 -m venv --system-site-packages venv/
    source venv/bin/activate
@@ -51,12 +94,12 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
    installed system-wide (`rclpy`, `tf_transformations`, ...) remain importable
    from inside the environment.
 
-7. Install required Python packages:
+4. Install required Python packages:
    ```bash
    pip install -r mctsVoRos/requirements.txt
    ```
 
-8. Build the project:
+5. Build the project:
    ```bash
    colcon build
    source install/setup.bash
@@ -65,15 +108,17 @@ This repository contains the implementation for the paper "Safe Monte Carlo Plan
 ## Running Experiments
 
 ### Important Pre-Run Requirements
-1. Navigate to the mctsVoRos directory:
-   ```bash
-   cd ~/colcon_ws/src/MCTS_VO_ROS/mctsVoRos
-   ```
 
-2. Create debug directory:
-   ```bash
-   mkdir debug
-   ```
+Every command below is run from the `mctsVoRos/` directory:
+
+```bash
+cd ~/colcon_ws/src/MCTS_VO_ROS/mctsVoRos
+```
+
+With Docker that is already the working directory inside the container, so put
+`docker/run.sh` in front of each command and run it from the repository root
+instead. The output directories are created on demand; nothing has to exist
+beforehand.
 
 ### Reproducing Paper Experiments
 **Note: All commands should be run from the `~/colcon_ws/src/MCTS_VO_ROS/mctsVoRos` directory.**
@@ -146,9 +191,13 @@ Useful options (see `./run_all_experiments.sh --help` for the full list):
 | `-a, --algorithms "A B"` | subset of algorithms |
 | `-t, --trajectories "X Y"` | subset of domains |
 | `-f, --force` | re-run configurations that already have results |
+| `-x, --extra "ARGS"` | extra arguments passed straight to `loopHandler_copy.py` |
 | `--skip-build` | source and activate, but skip `colcon build` |
 | `--skip-setup` | run in the current shell, without sourcing/building/activating |
 | `--ros-distro NAME` | ROS 2 distribution (default: `$ROS_DISTRO`, else `foxy`) |
+
+`-x` is how per-run options reach the planner from a campaign, for example
+`-x "--obs-speed-scale 1.5"` to run the whole campaign against faster obstacles.
 
 The virtual environment must be created with `--system-site-packages`, otherwise
 the ROS 2 Python packages (`rclpy`, `tf_transformations`, ...) are not visible
@@ -164,15 +213,78 @@ Example:
 python3 loopHandler_copy.py --exp_num 1 --algorithm VO-TREE --trajectories sinusoidal
 ```
 
+Run `python3 loopHandler_copy.py --help` for the full list; each option carries the
+reasoning for its default. The ones that change what is being measured, rather
+than how much of it:
+
+| Option | Effect |
+| --- | --- |
+| `--obs-speed-scale K` | multiplies the speed of every obstacle in either scene (default 1) |
+| `--env-build {fixed,orig,50hz}` | which simulator build to launch |
+| `--env-render {window,headless}` | whether the simulator draws a window |
+
+### Obstacle speed
+
+Both scenes are normalised so that every obstacle peaks at exactly `0.1 * K` m/s,
+and `--max-obs-vel` — the speed the velocity obstacles are sized for — is derived
+from the same number, so the planner and the simulator cannot disagree:
+
+```bash
+python3 loopHandler_copy.py --algorithm VO-TREE --trajectories sinusoidal --obs-speed-scale 1.5
+```
+
+`K` scales the *step period*, not the velocity, so the obstacles walk exactly the
+same paths on a faster clock: the geometry, the waypoints and the random draws are
+unchanged, and only the pace differs. The robot itself tops out at 0.3 m/s, so
+past `K = 3` it has no speed advantage left to avoid with.
+
+Two things to know before comparing across it. Runs at different `K` did not face
+the same scene, so their outcomes are not comparable — `summarize_debug.py` warns
+when a summary mixes them. And runs recorded before the speeds were normalised had
+the sinusoidal obstacles moving at 0.5078 m/s rather than 0.1; use
+`--obs-speed-scale 5.099` to reproduce that exactly.
+
+The scale reaches the simulator as `-obsSpeedScale` and is recorded in every
+result CSV as `obsSpeedScale`, beside `maxObsVel`. Only builds from 2026-08-04
+onwards honour it — older ones ignore the argument.
+
+## Reading the results
+
+`mctsVoRos/summarize_debug.py` reads the run artefacts in `debug/` and prints five
+tables: outcomes, returns, timing, search depth and motion smoothness. It also
+snapshots a `debug/` folder under a label, so re-running after each fix does not
+silently overwrite the previous results.
+
+```bash
+cd mctsVoRos
+source ../venv/bin/activate
+python3 summarize_debug.py
+```
+
+**See [`mctsVoRos/SUMMARIZE_README.md`](mctsVoRos/SUMMARIZE_README.md) for the full
+guide** — what every column means and which direction is better, the snapshot
+workflow for stepping through the fixes, the plotting and animation commands, and
+the comparisons that will mislead you if you make them.
+
 ## Final Directory Structure
 
-After completing the installation steps, your directory structure should look like this:
+After completing the installation steps, your directory structure should look like
+this. `build/`, `install/` and `log/` are produced by `colcon build` and so appear
+only with the native install; the Docker route never creates them.
 
 ```
 ~/colcon_ws/src/MCTS_VO_ROS/
+├── docker/
+│   ├── Dockerfile
+│   ├── run.sh
+│   └── README.md
 ├── env_build/
-│   ├── sin_env/
-│   └── int_env/
+│   ├── sin_env/            # pre-fix builds
+│   ├── int_env/
+│   ├── sin_env_50hz/
+│   ├── int_env_50hz/
+│   ├── sin_env_fixed/      # current builds, used by default
+│   └── int_env_fixed/
 ├── mctsVoRos/
 │   ├── MCTS_VO/
 │   │   ├── bettergym/
@@ -192,7 +304,9 @@ After completing the installation steps, your directory structure should look li
 │   ├── loopHandler_copy.py
 │   ├── requirements.txt
 │   ├── run.py
-│   └── run_all_experiments.sh
+│   ├── run_all_experiments.sh
+│   ├── summarize_debug.py
+│   └── SUMMARIZE_README.md
 ├── build/
 ├── install/
 ├── log/

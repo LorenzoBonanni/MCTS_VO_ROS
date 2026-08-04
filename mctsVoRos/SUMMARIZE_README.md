@@ -2,12 +2,7 @@
 
 Reads the run artefacts in `debug/` and prints five tables: what happened, how well it scored,
 how long it took, how deep it searched, and how smooth the motion was. It also snapshots a
-`debug/` folder under a label, so that re-running after each bug fix does not silently overwrite
-the previous results.
-
-Both this file and the script are **untracked on purpose**. They sit next to the code but are
-never part of a commit, so `git checkout` and `git cherry-pick` never touch them, and stepping
-through the bug-fix commits does not keep deleting your tooling.
+`debug/` folder under a label, so that re-running does not silently overwrite the previous results.
 
 ## Quick start
 
@@ -66,22 +61,24 @@ python3 summarize_debug.py --csv mine.csv --runs-csv mine_runs.csv
 python3 summarize_debug.py --no-csv          # print the tables only
 ```
 
-## Comparing the bug fixes step by step
+## Comparing several batches
 
-Every run writes `data_<algo>_<n>.csv`. There is no run id in the name, so the next batch
-overwrites the last one. Snapshot before moving on:
+Every run writes `data_<algo>_<n>.csv`. There is no run id in the name, so **the next batch
+overwrites the last one**. Snapshot before changing anything and running again:
 
 ```bash
-# ... run your experiments at B1 ...
-python3 summarize_debug.py snapshot B1
+# ... run a batch ...
+python3 summarize_debug.py snapshot B4
 
-git cherry-pick 43010d5          # B2: gt_obs_pos
-# ... run again ...
-python3 summarize_debug.py snapshot B2
+# ... change something, run again ...
+python3 summarize_debug.py snapshot B5
 
-git cherry-pick 4b18117          # B3: max_obs_vel
 # ... and so on
 ```
+
+The label is any name you like — `B4`, `rs18`, `fast-obstacles`. Then a plain
+`python3 summarize_debug.py` shows every snapshot next to the live folder, each row prefixed with
+its label, so you can watch the numbers move from one batch to the next.
 
 `snapshot` **moves rather than copies**. It archives every run artefact into
 `debug_archive/<label>/`, draws the plots into `debug_archive/<label>/plots/`, and then clears
@@ -322,23 +319,35 @@ its own does not tell you why:
 
 ## Things that will mislead you
 
-**Discounted return is not comparable across the B5 fix.** The discount changed there from 0.9 per
-step to 0.81 per second (0.979 per step), and each run's return was computed with whatever was
-active at the time. Comparing discounted returns across that boundary is meaningless. Undiscounted
-return is unaffected. The script prints a warning when a summary spans groups with different
-discounts.
+**Discounted return is not comparable across a change of discount.** It went from 0.9 per step to
+0.81 per second (0.979 per step), and each run's return was computed with whatever was active at
+the time, so comparing discounted returns across that boundary is meaningless. Undiscounted return
+is unaffected. The script prints a warning when a summary spans groups with different discounts —
+though it can only do that for runs carrying a `gammaPerSecond` column; older ones look identical
+to it, so read `undiscountedReturn` when in doubt.
 
 **`steps` and `totalS` are not comparable across a change in `ts`.** A step is 0.1 s in the default
 configuration and 0.02 s at 25 Hz, so the step count changes even when nothing about the behaviour
 does. Another warning covers this.
 
+**Nothing is comparable across a change in `obsSpeedScale`.** This is the harshest of the three,
+because it is not one column: at `--obs-speed-scale 1.5` the obstacles moved half again as fast, so
+the runs did not face the same scene and every number above differs for reasons that have nothing
+to do with the planner. The script warns when a summary spans more than one scale. Runs recorded
+before the column existed are read as 1.0, since the builds then could not honour anything else.
+
+Related, and not something the script can warn about: runs from before the obstacle speeds were
+normalised were recorded with the sinusoidal obstacles moving at 0.5078 m/s rather than 0.1, and
+they carry no `obsSpeedScale` column to distinguish them. To compare against those, run at
+`--obs-speed-scale 5.099`, which reproduces the old motion exactly.
+
 **Timing rows marked `*` were reconstructed, not measured.** Runs made before the `step_stats`
 instrumentation have no per-phase record, but the split is still exactly recoverable, because the
 loop stored `times[i] = ts − t_sense − 0.005`. So `t_sense` and `t_plan` are real numbers, not
 guesses — but `cycleMed` for those rows is the configured period rather than an observed one, and
-`sims/step` comes from a separate file. Once the instrumentation commit is on your branch the
-asterisk disappears and everything is measured. If a run has no `ts` column the script assumes
-0.1 s; override with `--legacy-ts`.
+`sims/step` comes from a separate file. Runs that do have `step_stats_*.pkl` are read from it
+directly, and carry no asterisk. If a run has no `ts` column the script assumes 0.1 s; override
+with `--legacy-ts`.
 
 **Blank cells are usually correct.** `VO-PLANNER` has no tree, so depth and `sims/step` are empty
 for it. A dash means "this run never recorded that", not "zero".
@@ -352,13 +361,13 @@ snapshot command exists.
 
 | | |
 |---|---|
-| `summarize_debug.py` | the script (untracked) |
-| `SUMMARIZE_README.md` | this file (untracked) |
-| `debug/` | live results, gitignored |
-| `debug_archive/<label>/` | snapshots: data + `plots/` (untracked) |
-| `debug_plots/<algo>/<env>/<outcome>/` | output of `plot` (untracked) |
-| `analysis/summary.csv` | one row per group, rewritten every run (untracked) |
-| `analysis/runs.csv` | one row per run, rewritten every run (untracked) |
+| `summarize_debug.py` | the script |
+| `SUMMARIZE_README.md` | this file |
+| `debug/` | live results — where each run writes, and what gets overwritten |
+| `debug_archive/<label>/` | snapshots: data + `plots/` |
+| `debug_plots/<algo>/<env>/<outcome>/` | output of `plot` |
+| `analysis/summary.csv` | one row per group, rewritten every run |
+| `analysis/runs.csv` | one row per run, rewritten every run |
 | `~/.local/share/Trash/files/debug/` | earlier experiments: RADIUS_SCALE sweep, 5/10/20/25 Hz sweep |
 
 `--dir` reads any of these in place. Nothing is ever moved or deleted; `snapshot` copies.
