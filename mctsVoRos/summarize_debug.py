@@ -309,7 +309,7 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
 
     out_rows, ret_rows, tim_rows, dep_rows, smo_rows, wide = [], [], [], [], [], []
     any_derived = False
-    gammas, ts_values = set(), set()
+    gammas, ts_values, obs_scales = set(), set(), set()
 
     for k in keys:
         g = groups[k]
@@ -320,6 +320,11 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
             gm, tsv = r.get("gammaPerSecond", None), r.get("ts", None)
             gammas.add(round(float(gm), 6) if gm is not None and not pd.isna(gm) else None)
             ts_values.add(round(float(tsv), 6) if tsv is not None and not pd.isna(tsv) else None)
+            # Runs predating the column were all at scale 1: the builds could
+            # not honour any other value, so None means 1.0 rather than unknown.
+            osc = r.get("obsSpeedScale", None)
+            obs_scales.add(round(float(osc), 6)
+                           if osc is not None and not pd.isna(osc) else 1.0)
 
         steps_m, _ = mean_std(g, "nSteps")
         out_rows.append([label, n,
@@ -395,6 +400,11 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
     if len(real_ts) > 1:
         print(f"\n  WARNING: mixed control periods {sorted(real_ts)} - 'steps' and")
         print("  'totalS' are not comparable across these groups.")
+    if len(obs_scales) > 1:
+        print(f"\n  WARNING: mixed obstacle speed scales {sorted(obs_scales)}.")
+        print("  This is not a planner difference - the obstacles were moving at")
+        print("  different speeds, so the groups did not face the same scene and")
+        print("  NOTHING above is comparable across them, outcomes included.")
 
     if show_runs:
         print("\nPER-RUN")
