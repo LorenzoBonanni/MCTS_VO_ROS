@@ -4,6 +4,7 @@ import pickle
 import random
 import signal
 import subprocess
+import sys
 import argparse
 import pandas as pd
 import rclpy
@@ -39,14 +40,32 @@ parser.add_argument('--trajectories', default='sinusoidal', type=str,
                     help='Type of obstacle trajectories, i.e. which Unity '
                          'environment to launch. Also determines the output '
                          'directory (debug/<trajectories>).')
-parser.add_argument('--max-obs-vel', default=0.15, type=float,
+parser.add_argument('--obs-speed-scale', default=1.0, type=float,
+                    help='Multiplies the speed of every obstacle in either '
+                         'scene, as a difficulty knob. Passed to the simulator '
+                         'as -obsSpeedScale; see ObstacleSpeed.cs. It scales '
+                         'the step period rather than the velocity, so the '
+                         'paths are geometrically identical and only the clock '
+                         'they are walked on changes, and the shape of every '
+                         'speed distribution is preserved rather than '
+                         'truncated. Both scenes peak at exactly 0.1*k m/s. '
+                         'Needs a build from 2026-08-04 or later; older ones '
+                         'ignore the argument, which is why it is recorded per '
+                         'run. The robot tops out at 0.3 m/s, so past k = 3 it '
+                         'has no speed advantage left to avoid with. Note that '
+                         'k = 5.099 reproduces the sinusoidal obstacle motion '
+                         'as it was before the peaks were normalised, which is '
+                         'what every run before 2026-08-04 was recorded on.')
+parser.add_argument('--max-obs-vel', default=None, type=float,
                     help='Maximum obstacle speed the velocity obstacles are '
                          'sized for. This MUST be >= the fastest obstacle in '
-                         'the scene or the safety guarantee does not hold: '
-                         'move_1.cs and move_2.cs (Obstacle_7/8_MOVING in the '
-                         'sinusoidal scene) draw Random.Range(0.10, 0.15), so '
-                         'the true maximum is 0.15 m/s while the code assumed '
-                         '0.10.')
+                         'the scene or the safety guarantee does not hold. '
+                         'Left unset it is derived as SCENE_MAX_OBS_VEL * '
+                         '--obs-speed-scale, i.e. 0.10*k in both scenes, which '
+                         'is what keeps the planner and the simulator '
+                         'consistent. Pass 0.15 to reproduce runs recorded '
+                         'before the peaks were normalised; overriding it '
+                         'downwards is how the guarantee gets silently broken.')
 parser.add_argument('--exploration-c', default=1.0, type=float,
                     help='UCB exploration constant. The paper uses 10, but the '
                          'Q-values of the root actions span only ~0.06, while '
@@ -100,6 +119,23 @@ ENV_RENDER_ARGS_BY_MODE = {
     'headless': ['-batchmode', '-nographics'],
 }
 
+# Peak obstacle speed in either scene at --obs-speed-scale 1. One number for
+# both, because ObstacleSpeed.TargetMaxSpeed normalises them to it: every
+# movement script asks for the step period that puts its own longest step at
+# this speed. Keep the two in step - this is the value the velocity obstacles
+# are sized from.
+#
+# It was not always one number. Only two obstacles move in either scene
+# (Obstacle_9/10_MOVING; the move_1 and move_2 pair on Obstacle_7/8_MOVING is
+# serialised m_IsActive: 0 in both scenes and never runs), and before the
+# normalisation they were measured at 0.1001 in the intention scene but 0.5078
+# in the sinusoidal one. The sinusoidal pair adds its lateral term as a bare
+# per-step displacement, `pos.z += offset`, with no dt, so it moved at
+# amplitude/dt = 0.05/0.1 = 0.5 m/s sideways while its forward term ran at the
+# intended 0.1. Normalising the period rather than dividing that term by dt is
+# what keeps the trajectory identical while capping the speed.
+SCENE_MAX_OBS_VEL = 0.10
+
 # Root directory of every artifact produced by the experiments
 DEBUG_DIR = 'debug'
 
@@ -119,6 +155,27 @@ algorithm = cli_args.algorithm
 trajectories = cli_args.trajectories
 EXPLORATION_C = cli_args.exploration_c
 ENV_RENDER_ARGS = ENV_RENDER_ARGS_BY_MODE[cli_args.env_render]
+
+# Formatted here rather than at the call site so the number the simulator is
+# given is the number recorded in the CSV. ':g' keeps a '.' decimal separator
+# whatever the locale, which is what ObstacleSpeed.cs parses with.
+OBS_SPEED_SCALE = cli_args.obs_speed_scale
+if OBS_SPEED_SCALE <= 0:
+    parser.error('--obs-speed-scale must be positive')
+ENV_SPEED_ARGS = ['-obsSpeedScale', f'{OBS_SPEED_SCALE:g}']
+
+# Derived, not defaulted, so the velocity obstacles are always sized for the
+# scene that is actually running. Sizing them for less than the true maximum
+# does not degrade the planner gracefully, it voids the guarantee outright.
+TRUE_MAX_OBS_VEL = SCENE_MAX_OBS_VEL * OBS_SPEED_SCALE
+if cli_args.max_obs_vel is None:
+    cli_args.max_obs_vel = TRUE_MAX_OBS_VEL
+elif cli_args.max_obs_vel < TRUE_MAX_OBS_VEL:
+    print(f'WARNING: --max-obs-vel {cli_args.max_obs_vel:g} is below the true '
+          f'{trajectories} maximum {TRUE_MAX_OBS_VEL:g} at --obs-speed-scale '
+          f'{OBS_SPEED_SCALE:g}. The velocity obstacles are undersized and the '
+          f'collisions they exist to exclude can happen anyway.',
+          file=sys.stderr)
 
 # Environment executable and output directory for the selected trajectories
 env_build = ENV_BUILDS[cli_args.env_build][trajectories]
@@ -835,6 +892,12 @@ def save_data(loopHandler, exp_num):
         # also with envRender, so a result is not interpretable without them.
         "envBuild": cli_args.env_build,
         "envRender": cli_args.env_render,
+        # Obstacle difficulty. Only the builds from 2026-08-04 onwards honour
+        # it, so a value here is a claim about the binary as much as about the
+        # scene - and maxObsVel is recorded beside it because the two have to
+        # agree for the run to mean anything.
+        "obsSpeedScale": OBS_SPEED_SCALE,
+        "maxObsVel": cli_args.max_obs_vel,
         "expNum": exp_num,
         "reachGoal": loopHandler.reached_goal,
         "collision": loopHandler.collision,
@@ -889,7 +952,8 @@ def main(args=None):
     print(f"Experiment: {exp_num} | Algorithm: {algorithm} | Trajectories: {trajectories}")
     print(f"Environment: {env_build} | Output directory: {out_dir}")
     loopHandler = LoopHandler(dt)
-    process = subprocess.Popen([env_build] + ENV_RENDER_ARGS, preexec_fn=os.setpgrp)
+    process = subprocess.Popen([env_build] + ENV_RENDER_ARGS + ENV_SPEED_ARGS,
+                               preexec_fn=os.setpgrp)
     time.sleep(2)
     try:
         executor = SingleThreadedExecutor()

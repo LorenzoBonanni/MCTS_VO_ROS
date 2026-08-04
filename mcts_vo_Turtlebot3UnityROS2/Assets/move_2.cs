@@ -7,6 +7,12 @@ public class move_2 : MonoBehaviour
 
     public float dt = 0.1f; // Time interval for movement
     private float timer = 0f;
+    // See move_1.cs: the period is set so the fastest step comes out at the
+    // scene-wide peak speed, while dt stays the value used in the position
+    // arithmetic, so the path is unchanged.
+    private float stepPeriod;
+    private const float MinVelocity = 0.10f;
+    private const float MaxVelocity = 0.15f;
     private Vector3 startPosition;
     private Vector3 targetPosition;
     private int idx = 0;
@@ -31,6 +37,7 @@ public class move_2 : MonoBehaviour
     void Start()
     {
         Random.InitState(42);
+        stepPeriod = ObstacleSpeed.PeriodFor(MaxVelocity * dt);
         startPosition = transform.position;
         targetPosition = transform.position;
     }
@@ -49,7 +56,7 @@ public class move_2 : MonoBehaviour
             return 0f;
         }
         else {
-            return Random.Range(0.10f, 0.15f);
+            return Random.Range(MinVelocity, MaxVelocity);
         }
     }
 
@@ -99,14 +106,14 @@ public class move_2 : MonoBehaviour
         // before computing the next one is what makes the speed independent of
         // the frame rate.
         timer += Time.deltaTime;
-        while (timer >= dt)
+        while (timer >= stepPeriod)
         {
-            timer -= dt;
+            timer -= stepPeriod;
             transform.position = targetPosition;
             startPosition = targetPosition;
             targetPosition = startPosition + next_step();
         }
         // Interpolate the position smoothly between the start and target positions
-        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / dt);
+        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / stepPeriod);
     }
 }

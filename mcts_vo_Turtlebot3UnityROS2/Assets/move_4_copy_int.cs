@@ -7,6 +7,14 @@ public class move_4_copy_int : MonoBehaviour
 
     public float dt = 0.3f; // Time interval for movement
     private float timer = 0f;
+    // See move_1.cs: the period is set so the fastest step comes out at the
+    // scene-wide peak speed, while dt stays the value used in the position
+    // arithmetic. As in move_copy_int.cs this obstacle already ran at that
+    // peak, so at scale 1 nothing about it changes; at scale k it reaches its
+    // goal k times sooner along the same route.
+    private float stepPeriod;
+    // The flat speed used below, named so Start and Update cannot disagree.
+    private const float MaxVelocity = 0.1f;
     private Vector3 startPosition;
     private Vector3 targetPosition;
     private static Vector3 goal1 = new Vector3(-0.53f, 0.1f, -1.14f);
@@ -19,6 +27,7 @@ public class move_4_copy_int : MonoBehaviour
     void Start()
     {
         Random.InitState(42);
+        stepPeriod = ObstacleSpeed.PeriodFor(MaxVelocity * dt);
         startPosition = transform.position;
         targetPosition = transform.position;     
     }
@@ -31,8 +40,8 @@ public class move_4_copy_int : MonoBehaviour
         // `if` + `timer = 0f` the obstacle ran at 0.05 m/s windowed and 0.10
         // m/s headless, for the 0.1 m/s written below.
         timer += Time.deltaTime;
-        while (timer >= dt) {
-            timer -= dt;
+        while (timer >= stepPeriod) {
+            timer -= stepPeriod;
             transform.position = targetPosition;
             startPosition = targetPosition;
 
@@ -50,7 +59,7 @@ public class move_4_copy_int : MonoBehaviour
             }
 
             Vector3 pos = transform.position;
-            float velocity = 0.1f;
+            float velocity = MaxVelocity;
 
             Vector3 direction = (goal - pos).normalized;
             float goal_angle = Mathf.Atan2(direction.x, direction.z);
@@ -63,6 +72,6 @@ public class move_4_copy_int : MonoBehaviour
             idx+=1;
         }
         // Interpolate the position smoothly between the start and target positions
-        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / dt);
+        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / stepPeriod);
     }
 }

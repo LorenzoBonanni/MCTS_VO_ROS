@@ -7,11 +7,19 @@ public class move_4_copy : MonoBehaviour
 
     public float dt = 0.1f; // Time interval for movement
     private float timer = 0f;
+    // See move_1.cs: the period is set so the fastest step comes out at the
+    // scene-wide peak speed, while dt stays the value used in the position
+    // arithmetic, so the path is unchanged. That matters here in particular -
+    // dt also sets the sinusoid's phase advance per step, so dividing the
+    // lateral term by dt instead would have changed the spatial waveform.
+    private float stepPeriod;
     private Vector3 startPosition;
     private Vector3 targetPosition;
     // Step count, not seconds. Sized for dt = 0.2 and doubled now that every
-    // obstacle runs at 0.1, so the traverse still takes 24 s and covers the
-    // same ground, in half-size steps.
+    // obstacle runs at 0.1, so the traverse covers the same ground in half-size
+    // steps. How long it takes is no longer 240 * dt: a step lasts stepPeriod,
+    // so at scale 1 the full out-and-back is 240 * 0.5099 = 122 s, and at scale
+    // k it is that over k.
     private int period = 240;
     private int idx = 0;
 
@@ -20,11 +28,20 @@ public class move_4_copy : MonoBehaviour
     public  float frequency = 1f; // Frequency of the sinusoidal wave
     private float forwardSpeed = 0.1f; // Forward speed
     private int mulForwardSpeed = 1;
+    // Bounds of the per-step speed draw below, named so the step-period
+    // calculation in Start cannot drift away from the Random.Range it bounds.
+    private const float MinForwardSpeed = 0.05f;
+    private const float MaxForwardSpeed = 0.1f;
 
     // Start is called before the first frame update
     void Start()
     {
         Random.InitState(42);
+        // A step is (forwardSpeed * dt) along x and the sinusoid offset along
+        // z. The offset carries no dt, so at amplitude 0.05 and dt 0.1 it is
+        // five times the forward term and dominates the peak.
+        stepPeriod = ObstacleSpeed.PeriodFor(
+            new Vector2(MaxForwardSpeed * dt, amplitude).magnitude);
         startPosition = transform.position;
         targetPosition = transform.position;     
     }
@@ -39,12 +56,12 @@ public class move_4_copy : MonoBehaviour
         // headless, and whichever value happened to be live when the timer
         // tripped was the one used.
         timer += Time.deltaTime;
-        while (timer >= dt){
-            timer -= dt;
+        while (timer >= stepPeriod){
+            timer -= stepPeriod;
             transform.position = targetPosition;
             startPosition = targetPosition;
 
-            float speed = Random.Range(0.05f, 0.1f);
+            float speed = Random.Range(MinForwardSpeed, MaxForwardSpeed);
             forwardSpeed = mulForwardSpeed * speed;
             // X python = Unity Z
             // Z python = Unity Y 
@@ -79,6 +96,6 @@ public class move_4_copy : MonoBehaviour
             }
         }
         // Interpolate the position smoothly between the start and target positions
-        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / dt);
+        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / stepPeriod);
     }
 }
