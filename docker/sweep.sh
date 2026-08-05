@@ -63,8 +63,42 @@
 set -euo pipefail
 
 IMAGE="${IMAGE:-mctsvo:foxy}"
-REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 MOUNT=/ws/src/MCTS_VO_ROS
+
+# Every path handed to "docker run -v" has to be absolute. Docker reads a
+# source that does not start with / as the NAME of a named volume, and then
+# rejects it for containing slashes:
+#
+#   create sweeps/.../debug: "sweeps/.../debug" includes invalid characters
+#   for a local volume name
+#
+# "cd X && pwd" is the usual way to absolutise and it is not reliable here:
+# with CDPATH set in the environment, cd echoes the directory it resolved to,
+# so the command substitution captures that line as well as pwd's and the
+# result is two paths joined by a newline. CDPATH= disables that, -P resolves
+# symlinks, and -- stops a leading dash being read as an option.
+abspath() {
+    local p="$1" resolved
+    [ -d "${p}" ] || mkdir -p "${p}"
+    resolved="$(CDPATH= cd -P -- "${p}" && pwd)" || return 1
+    printf '%s' "${resolved}"
+}
+
+# Belt and braces: if anything above ever fails to produce an absolute path,
+# say which variable it was, rather than leaving docker to complain about a
+# volume name several minutes into the sweep.
+require_abs() {
+    case "$2" in
+        /*) ;;
+        *) echo "sweep.sh: ${1} is not an absolute path: '${2}'" >&2
+           echo "  This has to be absolute for 'docker run -v' to read it as a" >&2
+           echo "  directory. Please report the line above." >&2
+           exit 1 ;;
+    esac
+}
+
+REPO="$(abspath "$(dirname "${BASH_SOURCE[0]}")/..")"
+require_abs REPO "${REPO}"
 
 # The B9 defaults. The centre point of the one-axis-at-a-time sweep, and what
 # the two parameters not being swept are held at.
@@ -114,8 +148,8 @@ while [ $# -gt 0 ]; do
 done
 
 [ -n "${OUT}" ] || OUT="${REPO}/sweeps/$(date +%Y%m%d-%H%M%S)"
-mkdir -p "${OUT}"
-OUT="$(cd "${OUT}" && pwd)"
+OUT="$(abspath "${OUT}")"
+require_abs OUT "${OUT}"
 DRIVER_LOG="${OUT}/sweep.log"
 
 log() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "${DRIVER_LOG}"; }
@@ -221,6 +255,7 @@ run_config() {
     # that does not exist is created by the daemon as root, and then nothing
     # inside the container can write to it.
     mkdir -p "${dir}/debug" "${dir}/logs"
+    require_abs "the directory for ${name}" "${dir}"
 
     cat > "${dir}/config.env" <<EOF
 NAME=${name}
