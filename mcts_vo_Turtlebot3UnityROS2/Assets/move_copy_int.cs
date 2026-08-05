@@ -1,10 +1,8 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-
 public class move_copy_int : MonoBehaviour
 {
-
     public float dt = 0.3f; // Time interval for movement
     private float timer = 0f;
     private Vector3 startPosition;
@@ -14,8 +12,6 @@ public class move_copy_int : MonoBehaviour
     private Vector3 goal = goal1;
     private int idx = 0;
     private float randNum = 0.0f;
-
-
     // Start is called before the first frame update
     void Start()
     {
@@ -23,20 +19,13 @@ public class move_copy_int : MonoBehaviour
         startPosition = transform.position;
         targetPosition = transform.position;     
     }
-
     // Update is called once per frame
     void Update()
     {
-        // See move_1.cs: `while` + `timer -= dt` + finishing the step before the
-        // next one is computed, so that a step takes dt at any frame rate. With
-        // `if` + `timer = 0f` the obstacle ran at 0.05 m/s windowed and 0.10
-        // m/s headless, for the 0.1 m/s written below.
         timer += Time.deltaTime;
-        while (timer >= dt) {
+        while (timer >= dt){
             timer -= dt;
             transform.position = targetPosition;
-            startPosition = targetPosition;
-
             if (Vector3.Distance(transform.position, goal) < 0.1f){
                 if (goal == goal1){
                     goal = goal2;
@@ -45,21 +34,17 @@ public class move_copy_int : MonoBehaviour
                     goal = goal1;
                 }
             }
-
-            // idx was never incremented, so `idx % 10` was always 0 and the
-            // steering perturbation was re-drawn every step rather than every
-            // tenth, making this obstacle far more erratic than intended.
             if (idx % 10 == 0) {
                 randNum = Random.Range(-0.5f, 0.5f) * 1.5f;
             }
-            idx += 1;
-
+            // Debug.Log("Current idx: " + idx);
             // X python = Unity Z
-            // Z python = Unity Y
+            // Z python = Unity Y 
             // Y python = Unity -X
             Vector3 pos = transform.position;
-
-            float velocity = 0.1f;
+            startPosition = transform.position;
+            
+            float velocity = 0.15f;
             Vector3 direction = (goal - pos).normalized;
             float goal_angle = Mathf.Atan2(direction.x, direction.z);
             float angle = goal_angle + randNum;
@@ -68,8 +53,10 @@ public class move_copy_int : MonoBehaviour
             pos.z = new_z;
             pos.x = new_x;
             targetPosition = pos;
+            idx += 1;
         }
         // Interpolate the position smoothly between the start and target positions
-        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / dt);
+        float t = timer / dt;
+        transform.position = Vector3.Lerp(startPosition, targetPosition, t);
     }
 }

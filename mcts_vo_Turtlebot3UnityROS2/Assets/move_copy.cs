@@ -1,85 +1,100 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-
 public class move_copy : MonoBehaviour
 {
-
-    public float dt = 0.1f; // Time interval for movement
+    public float dt = 0.3f;
     private float timer = 0f;
     private Vector3 startPosition;
     private Vector3 targetPosition;
-    // Step counts, not seconds. These were sized for dt = 0.2 and are doubled
-    // now that every obstacle runs at 0.1, so the traverse still takes 48 s
-    // and covers the same ground, in half-size steps.
-    private int period = 480;
-    private int idx = 480-120;
-
+    private int idx = 240 - 60;
     // PARAMETERS SINUSOIDAL
-    public float amplitude = 0.01f; // Amplitude of the sinusoidal wave
-    public  float frequency = 1f; // Frequency of the sinusoidal wave
-    private float forwardSpeed = 0.08f; // Forward speed
+    public float amplitude = 0.01f;
+    public float frequency = 1f;
+    private float forwardSpeed;
     private int mulForwardSpeed = 1;
+    public int multiplier = 1;
+    private Vector3 old_pos;
+    private Vector3 velocity;
+    // The random speed is only redrawn every second completed movement step
+    // and reused for the intermediate step in between.
+    private int speedStepCount = 0;
 
-
-    // Start is called before the first frame update
+    // The outward leg is recorded step by step, then replayed forwards and
+    // backwards for ever, so the obstacle retraces exactly the path it drove
+    // the first time instead of jumping at the point where it used to flip
+    // direction and reset idx to 0 (which broke the sinusoid's continuity).
+    private List<Vector3> steps = new List<Vector3>();
+    private bool recording = true;
+    private int phase = 0;
     void Start()
     {
         Random.InitState(42);
         startPosition = transform.position;
-        targetPosition = transform.position;     
+        targetPosition = transform.position;
+        // initial speed
+        forwardSpeed = mulForwardSpeed * Random.Range(0.0f, 0.1f);
     }
 
-    // Update is called once per frame
+    Vector3 next_step()
+    {
+        if (recording)
+        {
+            // Randomize speed for this trajectory segment, only every second
+            // completed movement step; reuse it for the step in between.
+            if (speedStepCount % 100 == 0)
+            {
+                forwardSpeed = mulForwardSpeed * Random.Range(0.0f, 0.15f);
+            }
+            speedStepCount++;
+            // Sinusoidal trajectory: apply the change in the sinusoidal
+            // offset between consecutive steps, not the absolute offset.
+            float previousOffset = Mathf.Sin((idx - 1) * frequency * dt) * amplitude;
+            float currentOffset  = Mathf.Sin(idx * frequency * dt) * amplitude;
+            Vector3 step = new Vector3(forwardSpeed * dt, 0f, currentOffset - previousOffset);
+            steps.Add(step);
+            idx++;
+            if (idx == (240 * multiplier))
+            {
+                recording = false;      // outward leg done, start the way back
+                phase = steps.Count;
+            }
+            return step;
+        }
+
+        int n = steps.Count;
+        if (n == 0)
+        {
+            return Vector3.zero;
+        }
+        // phase runs 0..2n-1: out along the recorded steps, then back along the
+        // same steps negated and in reverse order. Undoing exactly what was
+        // done returns the obstacle to its starting point, so the cycle cannot
+        // drift however long the run lasts.
+        Vector3 s = phase < n ? steps[phase] : -steps[2 * n - 1 - phase];
+        phase = (phase + 1) % (2 * n);
+        return s;
+    }
+
     void Update()
     {
-        // See move_1.cs: `while` + `timer -= dt` + finishing the step before the
-        // next one is computed, so a step takes dt at any frame rate. The speed
-        // draw also moves inside the loop - it used to run once per frame, so
-        // it was re-rolled 15 times a second windowed and 4500 times a second
-        // headless, and whichever value happened to be live when the timer
-        // tripped was the one used.
         timer += Time.deltaTime;
-        while (timer >= dt){
+        while (timer >= dt)
+        {
+            // preserve carryover
             timer -= dt;
-            transform.position = targetPosition;
             startPosition = targetPosition;
-
-            float speed = Random.Range(0.0f, 0.1f);
-            forwardSpeed = mulForwardSpeed * speed;
-            // X python = Unity Z
-            // Z python = Unity Y 
-            // Y python = Unity -X
-            Vector3 pos = transform.position;
-
-            // Trefoil knot trajectory calculation
-            // float t = idx * dt * 0.01f; // Reduce the speed by scaling down t
-            // int multiplier = 1;
-            // float omega = 0.1f;
-            // float scale_x = 0.1f;
-            // float scale_y = 0.1f;
-            // float trefoilX = multiplier * scale_x * (Mathf.Sin(omega * idx) + 2 * Mathf.Sin(2 * omega * idx));
-            // float trefoilZ = multiplier * scale_y * (Mathf.Cos(omega * idx) - 2 * Mathf.Cos(2 * omega * idx));
-            // pos.x = startPosition.x + trefoilX;
-            // pos.z = startPosition.z + trefoilZ;
-            // float velocity = get_velocity(idx);
-            // float angle = get_angle(idx) * Mathf.Deg2Rad;
-            // float new_z = pos.z + velocity * dt * Mathf.Cos(angle);
-            // float new_x = pos.x + velocity * dt * Mathf.Sin(angle);
-
-
-            float offset = Mathf.Sin(idx * frequency * dt) * amplitude;
-            pos.x += forwardSpeed * dt;
-            pos.z += offset;
-
-            targetPosition = pos;
-            idx += 1;
-            if (idx == period){
-                mulForwardSpeed *= -1;
-                idx = 0;
-            }
+            targetPosition = startPosition + next_step();
         }
-        // Interpolate the position smoothly between the start and target positions
-        transform.position = Vector3.Lerp(startPosition, targetPosition, timer / dt);
+        // interpolation
+        float t = timer / dt;
+        old_pos = transform.position;
+        transform.position = Vector3.Lerp(
+            startPosition,
+            targetPosition,
+            t
+        );
+        // Compute velocity (m/s)
+        velocity = (transform.position - old_pos) / Time.deltaTime;
     }
 }

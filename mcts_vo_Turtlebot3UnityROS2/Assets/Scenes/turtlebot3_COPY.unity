@@ -477,8 +477,10 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   dt: 0.1
-  amplitude: 0.05
+  amplitude: 0.2
   frequency: 1
+  forwardSpeed: 0.05
+  multiplier: 1
 --- !u!54 &433355419 stripped
 Rigidbody:
   m_CorrespondingSourceObject: {fileID: 8753101125338730103, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
@@ -530,7 +532,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   NodeName: single_transform_publisher
-  TfPublishingFrequency: 50
+  TfPublishingFrequency: 10
   ParentFrame: {fileID: 578576699}
   ChildFrame: {fileID: 807042946}
 --- !u!114 &578576701
@@ -1304,7 +1306,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8753101125198676617, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: ScanningFrequency
-      value: 50
+      value: 10
       objectReference: {fileID: 0}
     - target: {fileID: 8753101125338730101, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: BaseRigidbody
@@ -1377,7 +1379,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!135 &1275237203
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -1488,7 +1490,7 @@ GameObject:
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0
   m_StaticEditorFlags: 0
-  m_IsActive: 0
+  m_IsActive: 1
 --- !u!135 &1277083099
 SphereCollider:
   m_ObjectHideFlags: 0
@@ -1691,8 +1693,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   dt: 0.1
-  amplitude: 0.05
+  amplitude: 0.2
   frequency: 1
+  multiplier: 1
 --- !u!4 &1468977057 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 8753101125198676622, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
