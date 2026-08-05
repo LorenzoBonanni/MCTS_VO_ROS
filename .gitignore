@@ -53,3 +53,5 @@ qtcreator-*
 CATKIN_IGNORE
 
 venv/
+# Parameter sweeps: one directory per configuration, written by docker/sweep.sh
+sweeps/
