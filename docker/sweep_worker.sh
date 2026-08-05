@@ -41,6 +41,23 @@ if (( task_id >= total_cells )); then
     exit 0
 fi
 
+# summarize_sweep.sh reads configs.tsv and there is nothing else on the cluster
+# to write it. The first task of the first array job does it, once: any other
+# task would be racing, and every task has the same lists anyway.
+if (( SLURM_ARRAY_TASK_ID == 0 && SLURM_PROCID == 0 )); then
+    mkdir -p "$SWEEP_DIR"
+    {
+        printf 'name\trs\tgamma\tc\n'
+        for rs in "${rs_values[@]}"; do
+          for g in "${gamma_values[@]}"; do
+            for c in "${c_values[@]}"; do
+                printf 'rs%s_g%s_c%s\t%s\t%s\t%s\n' "$rs" "$g" "$c" "$rs" "$g" "$c"
+            done
+          done
+        done
+    } > "$SWEEP_DIR/configs.tsv"
+fi
+
 rs_idx=$((   task_id / (num_gamma * num_c * num_scenes) ))
 gamma_idx=$(( (task_id / (num_c * num_scenes)) % num_gamma ))
 c_idx=$((     (task_id / num_scenes) % num_c ))
