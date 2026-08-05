@@ -152,6 +152,12 @@ OUT="$(abspath "${OUT}")"
 require_abs OUT "${OUT}"
 DRIVER_LOG="${OUT}/sweep.log"
 
+# Identifies this sweep's containers, so Ctrl-C can stop exactly them and
+# nothing else - another sweep running beside it, or an unrelated
+# docker/run.sh, is left alone.
+SWEEP_ID="$(basename "${OUT}")"
+SWEEP_LABEL="mctsvo-sweep=${SWEEP_ID}"
+
 log() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "${DRIVER_LOG}"; }
 
 if ! docker image inspect "${IMAGE}" >/dev/null 2>&1; then
@@ -284,6 +290,10 @@ EOF
 
     local args=(
         --rm --init
+        # Labelled and named so that Ctrl-C, or anyone at all, can find these
+        # containers again without having to guess from the image name.
+        --label "${SWEEP_LABEL}"
+        --name "mctsvo-sweep-${SWEEP_ID}-${name}"
         -v "${REPO}:${MOUNT}"
         -v "${dir}/debug:${MOUNT}/mctsVoRos/debug"
         -v "${dir}/logs:${MOUNT}/mctsVoRos/logs"
@@ -342,6 +352,29 @@ reap() {
     fi
     SLOT_PID[$s]=0
 }
+
+# Ctrl-C kills the driver and the docker CLIs it started, but a container whose
+# CLI dies can be left running - and a stray Unity inside one will happily go on
+# consuming a core until someone notices. Stop them by label, which is why they
+# carry one. Interrupting is otherwise safe: every finished run is already on
+# disk in its own directory, and rerunning with the same -o skips them.
+stop_containers() {
+    local ids
+    ids="$(docker ps -q --filter "label=${SWEEP_LABEL}" 2>/dev/null)" || return 0
+    [ -n "${ids}" ] || return 0
+    echo
+    echo "stopping $(echo "${ids}" | wc -l) container(s)..." >&2
+    # shellcheck disable=SC2086
+    docker stop ${ids} >/dev/null 2>&1 || true
+}
+on_interrupt() {
+    trap - INT TERM
+    echo >&2
+    echo "Interrupted. Finished runs are kept; rerun with -o ${OUT} to resume." >&2
+    stop_containers
+    exit 130
+}
+trap on_interrupt INT TERM
 
 FAILURES=0
 START=$(date +%s)
