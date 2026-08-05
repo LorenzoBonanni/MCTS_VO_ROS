@@ -120,6 +120,15 @@ parser.add_argument('--radius-scale', default=1.8, type=float,
                          'compensating for a front-facing arc under-estimating '
                          'the true radius. Too large and VO prunes away every '
                          'forward heading, leaving the robot stopped.')
+parser.add_argument('--no-plots', action='store_true',
+                    help='Skip the end-of-run animations. Every run otherwise '
+                         'renders a trajectory GIF at dpi=300, and a rollout '
+                         'MP4 on top of that for anything with a tree, which '
+                         'together take longer than the run that produced '
+                         'them. The data - the CSV and the pickles - is '
+                         'written either way, so a sweep loses nothing but the '
+                         'pictures. Plot them later from the archive with '
+                         'summarize_debug.py plot --anim.')
 
 # Unity builds, per obstacle-trajectory type. Three variants exist because the
 # obstacle-motion fix changes the environment rather than the planner, so runs
@@ -966,6 +975,14 @@ def save_data(loopHandler, exp_num):
         # agree for the run to mean anything.
         "obsSpeedScale": OBS_SPEED_SCALE,
         "maxObsVel": cli_args.max_obs_vel,
+        # The swept parameters, recorded per run so that a directory of results
+        # says what produced it. summarize_debug.py already reads all four and
+        # already warns when a comparison mixes gammaPerSecond - it just never
+        # had them to read, so the warning could not fire.
+        "ts": dt,
+        "radiusScale": RADIUS_SCALE,
+        "explorationC": EXPLORATION_C,
+        "gammaPerSecond": GAMMA_S,
         "expNum": exp_num,
         "reachGoal": loopHandler.reached_goal,
         "collision": loopHandler.collision,
@@ -1032,7 +1049,8 @@ def main(args=None):
         # kill the environment process
         os.killpg(os.getpgid(process.pid), signal.SIGTERM)
         save_data(loopHandler, exp_num)
-        debug_plots_and_animations(loopHandler, exp_num, algorithm=algorithm, out_dir=out_dir)
+        if not cli_args.no_plots:
+            debug_plots_and_animations(loopHandler, exp_num, algorithm=algorithm, out_dir=out_dir)
         gc.collect()
 
 
