@@ -160,6 +160,17 @@ if ! docker image inspect "${IMAGE}" >/dev/null 2>&1; then
     exit 1
 fi
 
+# The planner is a submodule, and a checkout does not populate it on its own.
+# Without this the sweep would start, every single run would die on
+# "No module named 'MCTS_VO.experiment_utils'", and the campaign script would
+# report the failures and still exit 0 - so the sweep would look like it was
+# working until it produced no data hours later. One second here instead.
+if [ ! -f "${REPO}/mctsVoRos/MCTS_VO/experiment_utils.py" ]; then
+    echo "The MCTS_VO submodule is not populated." >&2
+    echo "    git submodule update --init" >&2
+    exit 1
+fi
+
 # ---------------------------------------------------------------------------
 # The configurations. A name that carries all three values, so a directory is
 # self-describing and the naming survives a switch to --grid.
@@ -290,6 +301,27 @@ EOF
             -n "${NUM_EXP}" -a "${ALGORITHMS}" -t "${TRAJECTORIES}" \
             -x "--env-render headless --no-plots --radius-scale ${rs} --gamma-per-second ${g} --exploration-c ${c} ${EXTRA}" \
         >> "${dir}/run.log" 2>&1
+
+    # run_all_experiments.sh prints how many runs failed and then exits 0
+    # regardless, so its status says nothing about whether there is any data.
+    # Count what actually landed instead.
+    local produced expected
+    produced="$(find "${dir}/debug" -name 'data_*.csv' 2>/dev/null | wc -l)"
+    expected=$(( n_algos * n_scenes * NUM_EXP ))
+    if [ "${produced}" -eq 0 ]; then
+        {
+            echo "NO RUN PRODUCED ANY DATA."
+            echo "The first place to look is logs/<scene>/<algorithm>_0.log in"
+            echo "this directory - the traceback will be at the end of it."
+        } >> "${dir}/run.log"
+        return 1
+    fi
+    if [ "${produced}" -lt "${expected}" ]; then
+        echo "INCOMPLETE: ${produced} of ${expected} runs produced data." \
+             >> "${dir}/run.log"
+        return 1
+    fi
+    return 0
 }
 
 # ---------------------------------------------------------------------------
