@@ -1,51 +1,27 @@
 #!/usr/bin/env bash
-# Parameter sweep, rs x gamma x c x scene, on Slurm.
-#
-# ONE SRUN TASK = ONE CELL of the grid = one (rs, gamma, c, scene), and it runs
-# all NUM_EXP run numbers for that cell in sequence. That is the granularity to
-# pick: a single 90 s run per task would make 2560 tasks and the scheduler would
-# spend longer placing them than the runs take.
-#
-#   4 rs x 4 gamma x 4 c x 2 scenes = 128 cells
-#   16 cells per node, so --array=0-127:16 = 8 array jobs
-#   each cell is NUM_EXP runs of ~90 s, so ~30 min per task at NUM_EXP=20
-#
-# Cells are independent, so the array can be as wide as the queue allows.
-#
-# 16 x 4 on a 64-core EPYC 7713. A run is one single-threaded planner plus a
-# headless Unity, so four cores each is already slack - the worker pins the
-# thread pools to stop HDBSCAN and BLAS claiming the whole node per task.
-# Memory is not the constraint: about 2 GB a run against 504 GB on the node,
-# so --mem-per-cpu is set well above what is needed and ignored thereafter.
-# 8 x 8 works too and leaves more headroom per run; it just doubles the array.
-#
+# Hyperparameter sweep: rs x gamma x c x scene (fixed algorithm).
+# Each cell runs NUM_EXP different seeds (exp_num 0..NUM_EXP-1).
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=16
-#SBATCH --cpus-per-task=4
+#SBATCH --ntasks-per-node=8
+#SBATCH --cpus-per-task=8
 #SBATCH --mem-per-cpu=2G
 #SBATCH --gpus-per-task=0
 #SBATCH --partition=normal
 #SBATCH --job-name=mctsvo-sweep
-#SBATCH --time=02:00:00
-#SBATCH --array=0-127:16
-#SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/mctsvo_%A_%a.out
+#SBATCH --time=06:00:00
+#SBATCH --array=0-127:16          # 4 rs * 4 gamma * 4 c * 2 scenes = 128 cells
+#SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/sweep_%A_%a.out
 
-# PATHS HERE ARE THE CONTAINER'S, not the host's. This script body runs
-# outside the container - only the srun step below is inside it - so it must
-# not touch these paths itself, just hand them on. /root/sweep is where the EDF
-# mounts ${OUTPUT_SCRATCH}/sweep; the worker creates what it needs once inside.
-#
-# One fixed directory rather than one per job id, because the worker skips any
-# run whose CSV is already there: resubmitting after a wall-clock kill then
-# carries on instead of starting the grid again. Pass SWEEP_DIR=/root/sweep/$(date +%F)
-# to keep a submission separate.
+export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
+export TRAJECTORIES="sinusoidal intention"
+export RS_VALS="1.4 1.8 2.2 2.6"
+export GAMMA_VALS="0.65 0.81 0.90 0.95"
+export C_VALS="0.5 1.0 2.0 5.0"
+export NUM_EXP=100                 # independent seeds per combination
+export MAX_OBS_VEL=0.1
+export ROLLOUT_COLLISION="check"
+
 export SWEEP_DIR="${SWEEP_DIR:-/root/sweep}"
-
-# The checkout, as the EDF mounts it.
 export MCTSVO_REPO="${MCTSVO_REPO:-/workspace/MCTS_VO_ROS}"
 
-export NUM_EXP="${NUM_EXP:-20}"
-
-# --environment names an EDF in ~/.edf/. There is no docker daemon on a compute
-# node, so the image has to come through the container engine.
 srun --environment=mctsvo "$MCTSVO_REPO/docker/sweep_worker.sh"

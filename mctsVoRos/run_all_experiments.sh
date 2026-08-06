@@ -177,7 +177,28 @@ echo "=========================================================="
 # Make sure no leftover Unity instance is running before starting, and clean up
 # on exit (e.g. when the user presses Ctrl-C).
 cleanup() {
-    pkill -f "env_build/.*env.x86_64" 2>/dev/null
+    # Kill the known Unity executables (adjust names if needed)
+    pkill -9 -f "SIN_EASY.x86_64" 2>/dev/null
+    pkill -9 -f "INT_EASY.x86_64" 2>/dev/null
+    # Fallback: kill any Unity player that might still be running
+    pkill -9 -f "\.x86_64" 2>/dev/null
+
+    # Wait until they are gone (max 5 seconds)
+    for i in {1..5}; do
+        if ! pgrep -f "SIN_EASY.x86_64\|INT_EASY.x86_64" > /dev/null; then
+            break
+        fi
+        sleep 1
+    done
+
+    if pgrep -f "SIN_EASY.x86_64\|INT_EASY.x86_64" > /dev/null; then
+        echo "WARNING: Unity process still alive after cleanup, attempting kill -9 again"
+        pkill -9 -f "SIN_EASY.x86_64\|INT_EASY.x86_64"
+        sleep 2
+    fi
+
+    # Optional: ensure the Unity process released its network sockets
+    # Not strictly needed if the next run sleeps a couple of seconds.
 }
 trap 'echo; echo "Interrupted, stopping."; cleanup; exit 130' INT TERM
 cleanup

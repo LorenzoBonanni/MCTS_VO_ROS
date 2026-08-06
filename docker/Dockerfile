@@ -18,6 +18,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         libxrender1 libxxf86vm1 libxfixes3 \
         libgl1 libglx-mesa0 libglu1-mesa libegl1 libgbm1 \
         libasound2 \
+        libassimp5 \
         procps psmisc \
         ffmpeg \
     && rm -rf /var/lib/apt/lists/*

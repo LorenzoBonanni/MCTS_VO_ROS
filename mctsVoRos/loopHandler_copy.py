@@ -37,7 +37,7 @@ parser.add_argument('--exp_num', default=0, type=int)
 parser.add_argument('--algorithm', default='VO-PLANNER', type=str,
                     choices=['MCTS', 'VO-TREE', 'VO-PLANNER'])
 parser.add_argument('--trajectories', default='sinusoidal', type=str,
-                    choices=['sinusoidal', 'intention'],
+                    choices=['sinusoidal', 'intention', 'sinusoidal_complex', 'intention_complex', 'sinusoidal_complex_speed', 'intention_complex_speed'],
                     help='Type of obstacle trajectories, i.e. which Unity '
                          'environment to launch. Also determines the output '
                          'directory (debug/<trajectories>).')
@@ -122,8 +122,12 @@ parser.add_argument('--env-render', default='headless', type=str,
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
-    'intention': '../env_build/INT/int.x86_64',
-    'sinusoidal': '../env_build/SIN/sin.x86_64',
+    'intention': '../env_build/INT_EASY/INT_EASY.x86_64',
+    'sinusoidal': '../env_build/SIN_EASY/SIN_EASY.x86_64',
+    'intention_complex': '../env_build/INT_COMPLEX/INT_COMPLEX.x86_64',
+    'sinusoidal_complex': '../env_build/SIN_COMPLEX/SIN_COMPLEX.x86_64',
+    'intention_complex_speed': '../env_build/INT_COMPLEX_SPEED/INT_COMPLEX_SPEED.x86_64',
+    'sinusoidal_complex_speed': '../env_build/SIN_COMPLEX_SPEED/SIN_COMPLEX_SPEED.x86_64',
 }
 # The pre-fix builds, kept reachable by path through --env-build. Their
 # obstacles step on the frame clock, so they run at about half speed whenever
@@ -440,13 +444,8 @@ class LoopHandler(Node):
         """Simply store the latest synchronised pair."""
         self.latest_odom = odom_msg
         self.latest_scan = scan_msg
-        # Temporary debug
-        self.get_logger().info(
-            f"[SYNC] pair received – odom ts: {odom_msg.header.stamp.sec}.{odom_msg.header.stamp.nanosec:09d}, "
-            f"scan ts: {scan_msg.header.stamp.sec}.{scan_msg.header.stamp.nanosec:09d}",
-            throttle_duration_sec=1.0   # log at most once per second
-        )
-    
+
+        
     def SetLaser(self, msg):
         """
         Sets the lidar message.
@@ -784,9 +783,6 @@ class LoopHandler(Node):
         # Start timing for obstacle estimation and planning
         start_time = time.time()
 
-        # Set a fixed random seed for reproducibility
-        seed_everything(0)
-
         # Estimate obstacles based on lidar data and update the environment's obstacle list
         self.obs_pos, self.obs_rad = self.estimate_obstacles(position, heading, dist, angles)
         self.s0.obstacles = (self.obs_pos, self.obs_rad)
@@ -823,7 +819,7 @@ class LoopHandler(Node):
         t1 = time.time() - start_time
 
         # Set a fixed random seed for reproducibility
-        seed_everything(0)
+        seed_everything(exp_num)
 
         # Start timing for planning
         initial_time = time.time()

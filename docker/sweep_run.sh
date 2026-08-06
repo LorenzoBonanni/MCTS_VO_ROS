@@ -32,7 +32,7 @@ rs_values=(1.4 1.8 2.2 2.6)
 gamma_values=(0.65 0.81 0.90 0.95)
 c_values=(0.5 1.0 2.0 5.0)
 scenes=(sinusoidal intention)
-num_runs=${NUM_EXP:-20}
+num_runs=${NUM_EXP:-100}
 
 num_rs=${#rs_values[@]}
 num_gamma=${#gamma_values[@]}

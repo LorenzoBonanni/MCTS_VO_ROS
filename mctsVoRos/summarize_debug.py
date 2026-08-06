@@ -24,6 +24,7 @@ from collections import defaultdict
 
 import numpy as np
 import pandas as pd
+from scipy.stats import norm, t as t_dist
 
 # The goal is a constant in loopHandler_copy.py and is never written to disk, so
 # plotting has to be told where it was. This is the corrected value; runs made
@@ -145,10 +146,40 @@ def discover(root, label=""):
 
 # ------------------------------------------------------------------ metrics --
 
-def rate(runs, col):
-    """Percentage of runs where a boolean CSV column is true."""
-    vals = [bool(r.get(col, False)) for r in runs]
-    return 100.0 * sum(vals) / len(vals) if vals else np.nan
+def wilson_ci(successes, trials, alpha=0.05):
+    """Wilson score interval for a binomial proportion."""
+    if trials == 0:
+        return (np.nan, np.nan)
+    p = successes / trials
+    z = norm.ppf(1 - alpha / 2)
+    denominator = 1 + z**2 / trials
+    centre = (p + z**2 / (2 * trials)) / denominator
+    margin = z * np.sqrt(p * (1 - p) / trials + z**2 / (4 * trials**2)) / denominator
+    return (max(0.0, centre - margin), min(1.0, centre + margin))
+
+
+def mean_ci(values, alpha=0.05):
+    """95% CI for the mean using Student's t-distribution."""
+    vals = np.array(values, dtype=float)
+    vals = vals[~np.isnan(vals)]
+    n = len(vals)
+    if n < 2:
+        return (np.nan, np.nan)
+    mean = np.mean(vals)
+    sem = np.std(vals, ddof=1) / np.sqrt(n)
+    t_crit = t_dist.ppf(1 - alpha / 2, df=n - 1)
+    return (mean - t_crit * sem, mean + t_crit * sem)
+
+
+def rate(runs, col, alpha=0.05):
+    """Percentage and 95% CI for a boolean column."""
+    n = len(runs)
+    s = sum(bool(r.get(col, False)) for r in runs)
+    if n == 0:
+        return (np.nan, np.nan, np.nan)
+    pct = 100.0 * s / n
+    lo, hi = wilson_ci(s, n, alpha)
+    return (pct, 100.0 * lo, 100.0 * hi)
 
 
 def mean_std(runs, col):
@@ -322,16 +353,28 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
             ts_values.add(round(float(tsv), 6) if tsv is not None and not pd.isna(tsv) else None)
 
         steps_m, _ = mean_std(g, "nSteps")
+
+        # Outcome rates with 95% CI
+        goal_pct, goal_lo, goal_hi = rate(g, "reachGoal")
+        col_pct, col_lo, col_hi = rate(g, "collision")
+        obs_pct, obs_lo, obs_hi = rate(g, "Obscollision")
+        to_pct, to_lo, to_hi = rate(g, "maxSteps")
+
         out_rows.append([label, n,
-                         fmt(rate(g, "reachGoal"), ".0f"),
-                         fmt(rate(g, "collision"), ".0f"),
-                         fmt(rate(g, "Obscollision"), ".0f"),
-                         fmt(rate(g, "maxSteps"), ".0f"),
+                         f"{goal_pct:.0f} ({goal_lo:.0f}-{goal_hi:.0f})",
+                         f"{col_pct:.0f} ({col_lo:.0f}-{col_hi:.0f})",
+                         f"{obs_pct:.0f} ({obs_lo:.0f}-{obs_hi:.0f})",
+                         f"{to_pct:.0f} ({to_lo:.0f}-{to_hi:.0f})",
                          fmt(steps_m, ".0f")])
 
         dm, ds = mean_std(g, "discountedReturn")
+        dm_ci_lo, dm_ci_hi = mean_ci([r.get("discountedReturn") for r in g])
         um, us = mean_std(g, "undiscountedReturn")
-        ret_rows.append([label, n, f"{fmt(dm)} +- {fmt(ds)}", f"{fmt(um)} +- {fmt(us)}"])
+        um_ci_lo, um_ci_hi = mean_ci([r.get("undiscountedReturn") for r in g])
+
+        ret_rows.append([label, n,
+                         f"{fmt(dm)} [{fmt(dm_ci_lo)}-{fmt(dm_ci_hi)}]",
+                         f"{fmt(um)} [{fmt(um_ci_lo)}-{fmt(um_ci_hi)}]"])
 
         t, derived = timing(g, legacy_ts)
         any_derived |= derived
@@ -358,18 +401,26 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
         wide.append(dict(
             group=label, source=k[0], trajectories=k[1], algorithm=k[2],
             suffix=k[3], n=n,
-            goalPct=rate(g, "reachGoal"), volCollPct=rate(g, "collision"),
-            obsCollPct=rate(g, "Obscollision"), timeoutPct=rate(g, "maxSteps"),
+            goalPct=goal_pct, goalPct_CIlo=goal_lo, goalPct_CIhi=goal_hi,
+            volCollPct=col_pct, volCollPct_CIlo=col_lo, volCollPct_CIhi=col_hi,
+            obsCollPct=obs_pct, obsCollPct_CIlo=obs_lo, obsCollPct_CIhi=obs_hi,
+            timeoutPct=to_pct, timeoutPct_CIlo=to_lo, timeoutPct_CIhi=to_hi,
             nSteps=steps_m, discReturn=dm, discReturnStd=ds,
-            undiscReturn=um, undiscReturnStd=us, timingDerived=derived,
+            discReturn_CIlo=dm_ci_lo, discReturn_CIhi=dm_ci_hi,
+            undiscReturn=um, undiscReturnStd=us,
+            undiscReturn_CIlo=um_ci_lo, undiscReturn_CIhi=um_ci_hi,
+            timingDerived=derived,
             **{kk: vv for kk, vv in t.items()}, **s))
 
-    table("OUTCOMES", ["group", "n", "goal%", "volColl%", "obsColl%", "timeout%", "steps"],
+    table("OUTCOMES",
+          ["group", "n", "goal% (95% CI)", "volColl%", "obsColl%", "timeout%", "steps"],
           out_rows,
           "volColl = robot drove into an obstacle (what VO must prevent);"
           " obsColl = obstacle hit a stopped robot.")
 
-    table("RETURNS", ["group", "n", "discounted", "undiscounted"], ret_rows)
+    table("RETURNS",
+          ["group", "n", "discounted [95% CI]", "undiscounted [95% CI]"],
+          ret_rows)
 
     table("TIMING (ms)", ["group", "senseMed", "senseP99", "planMed", "cycleMed",
                           "Hz", "totalS", "sims/step"], tim_rows,
