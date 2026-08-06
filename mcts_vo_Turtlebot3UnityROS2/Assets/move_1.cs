@@ -1,22 +1,12 @@
-using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
+using System.Collections.Generic;
+
 public class move_1 : MonoBehaviour
 {
-    public float dt = 0.1f; // Time interval for movement
-    private float timer = 0f;
-    private Vector3 startPosition;
-    private Vector3 targetPosition;
-    private int idx = 0;
-    private int shift = 15;
+    public float simulationDt = 0.1f;
 
-    // The offsets below (15, 20, 28, 40) and the max-idx cutoff (80) used in
-    // get_angle/get_velocity are step counts, not seconds. They were tuned
-    // assuming dt = 0.3s per step, so at that dt they mark real times of
-    // 4.5s, 6s, 8.4s, 12s, and 24s. If dt changes, the same step counts land
-    // at different real times, so they're rescaled in Start() by
-    // tunedDt / dt to keep the same real-world schedule at any dt.
     private const float tunedDt = 0.3f;
+    private int shift = 15;
     private int seg1 = 15;
     private int seg2 = 20;
     private int seg3 = 28;
@@ -24,83 +14,154 @@ public class move_1 : MonoBehaviour
     private int maxIdx = 80;
     public float maxSpeed = 0.15f;
 
-    // The random speed is only redrawn every second completed movement step
-    // (velocity > 0 steps) and reused for the intermediate step, so
-    // currentSpeed caches the last draw and velocityStepCount tracks parity.
-    private float currentSpeed = 0f;
-    private int velocityStepCount = 0;
-    // Start is called before the first frame update
+    // State for forward precomputation
+    private int idx = 0;
+    private Vector3 currentPosition;
+    private float[] precomputedSpeeds;
+
+    // Recording and replay
+    private List<Vector3> steps = new List<Vector3>();
+    private bool recording = true;
+    private int phase = 0;   // 0..2n-1
+
+    // Speed measurement
+    public Vector3 currentVelocity { get; private set; }
+    public float currentSpeed { get; private set; }
+
+    private float accumulator = 0f;
+
+    [Header("Debug Logging")]
+    public bool enableLogging = true;
+    public int logInterval = 10;
+
     void Start()
     {
         Random.InitState(42);
-        startPosition = transform.position;
-        targetPosition = transform.position;
 
-        // Rescale the step-count thresholds so they keep marking the same
-        // real-world times regardless of dt.
-        float scale = tunedDt / dt;
+        float scale = tunedDt / simulationDt;
         shift = Mathf.RoundToInt(shift * scale);
         seg1 = Mathf.RoundToInt(seg1 * scale);
         seg2 = Mathf.RoundToInt(seg2 * scale);
         seg3 = Mathf.RoundToInt(seg3 * scale);
         seg4 = Mathf.RoundToInt(seg4 * scale);
         maxIdx = Mathf.RoundToInt(maxIdx * scale);
-    }
-    int get_angle(int idx){
-        if(idx < shift+seg1){
-            return 120;
-        }
-        else if(idx < shift+seg2){
-            return 90;
-        }
-        else if(idx < shift+seg3){
-            return 80;
-        }
-        else if(idx < shift+seg4){
-            return 360;
-        }
-        else{
-            return 90;
-        }
-    }
-    float get_velocity(int idx){
-        if(idx > maxIdx | idx < shift){
-            return 0f;
-        }
-        else {
-            if (velocityStepCount % 100 == 0)
+
+        precomputedSpeeds = new float[maxIdx + 1];
+        int activeStepCount = 0;
+        float lastSpeed = 0f;
+        for (int i = 0; i <= maxIdx; i++)
+        {
+            if (i >= shift && i <= maxIdx)
             {
-                currentSpeed = Random.Range(0.10f, maxSpeed);
+                if (activeStepCount % 100 == 0)
+                    lastSpeed = Random.Range(0.10f, maxSpeed);
+                activeStepCount++;
+                precomputedSpeeds[i] = lastSpeed;
             }
-            velocityStepCount += 1;
-            return currentSpeed;
+            else
+            {
+                precomputedSpeeds[i] = 0f;
+            }
+        }
+
+        currentPosition = transform.position;
+        idx = 0;
+        recording = true;
+        phase = 0;
+        steps.Clear();
+        currentVelocity = Vector3.zero;
+        currentSpeed = 0f;
+
+        if (enableLogging)
+            Debug.Log("move_1 started. Will record path, then replay backward-first.");
+    }
+
+    void FixedUpdate()
+    {
+        accumulator += Time.fixedDeltaTime;
+        while (accumulator >= simulationDt)
+        {
+            StepObstacle();
+            accumulator -= simulationDt;
         }
     }
-    // Update is called once per frame
-    void Update()
+
+    private void StepObstacle()
     {
-        timer += Time.deltaTime;
-        while (timer >= dt){
-            timer -= dt;
-            // X python = Unity Z
-            // Z python = Unity Y 
-            // Y python = Unity -X
-            transform.position = targetPosition;
-            Vector3 pos = transform.position;
-            startPosition = transform.position;
-            
-            
-            float velocity = get_velocity(idx);
-            float angle = get_angle(idx) * Mathf.Deg2Rad;
-            float new_z = pos.z + velocity * dt * Mathf.Cos(angle);
-            float new_x = pos.x + velocity * dt * Mathf.Sin(angle);
-            pos.z = new_z;
-            pos.x = new_x;
-            targetPosition = pos;
-            idx += 1;
+        Vector3 step = Vector3.zero;
+
+        if (recording)
+        {
+            // ---- Outward leg: record and move ----
+            if (idx <= maxIdx)
+            {
+                float speed = precomputedSpeeds[idx];
+                float angle = GetAngle(idx) * Mathf.Deg2Rad;
+                float stepX = speed * simulationDt * Mathf.Sin(angle);
+                float stepZ = speed * simulationDt * Mathf.Cos(angle);
+                step = new Vector3(stepX, 0f, stepZ);
+
+                steps.Add(step);
+
+                currentPosition += step;
+                transform.position = currentPosition;
+                idx++;
+
+                if (idx > maxIdx)
+                {
+                    recording = false;
+                    phase = steps.Count;   // start replay by going backward (undo last step)
+                    if (enableLogging)
+                        Debug.Log($"Recording complete with {steps.Count} steps. Starting backward replay.");
+                }
+            }
         }
-        // Interpolate the position smoothly between the start and target positions
-        float t = timer / dt;
-        transform.position = Vector3.Lerp(startPosition, targetPosition, t);
+        else
+        {
+            // ---- Replay: phase starts at n (backward), then cycles ----
+            int n = steps.Count;
+            if (n == 0)
+                return;
+
+            if (phase < n)
+                step = steps[phase];                  // forward
+            else
+                step = -steps[2 * n - 1 - phase];     // backward
+
+            phase = (phase + 1) % (2 * n);            // cycle forever
+
+            currentPosition += step;
+            transform.position = currentPosition;
+        }
+
+        currentVelocity = step / simulationDt;
+        currentSpeed = currentVelocity.magnitude;
+
+        if (enableLogging)
+        {
+            int logStep = recording ? idx : phase;
+            if (logStep % logInterval == 0)
+            {
+                float simTime = idx * simulationDt;
+                string mode = recording ? "Recording" : "Replay";
+                Debug.Log($"{mode} Step {logStep} | Time: {simTime:F2}s | Speed: {currentSpeed:F4} m/s | " +
+                          $"Position: ({currentPosition.x:F4}, {currentPosition.z:F4}) | " +
+                          $"Step: ({step.x:F4}, {step.z:F4})");
+            }
+        }
+    }
+
+    private int GetAngle(int idx)
+    {
+        if (idx < shift + seg1)
+            return 120;
+        else if (idx < shift + seg2)
+            return 90;
+        else if (idx < shift + seg3)
+            return 80;
+        else if (idx < shift + seg4)
+            return 360;
+        else
+            return 90;
     }
 }

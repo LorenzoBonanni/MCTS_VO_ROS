@@ -476,8 +476,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 0b162456f218c609eaa7e255b595eb1c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  dt: 0.1
-  velocity: 0.1
+  simulationDt: 0.1
+  velocity: 0.15
+  maxSteps: 100000
+  enableLogging: 0
+  logInterval: 10
 --- !u!54 &433355419 stripped
 Rigidbody:
   m_CorrespondingSourceObject: {fileID: 8753101125338730103, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
@@ -1467,8 +1470,11 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 9e8e5ddf0edb1a985a259e227d732ff5, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  dt: 0.1
-  max_speed: 0.15
+  simulationDt: 0.1
+  max_speed: 0.2
+  enableLogging: 1
+  logInterval: 10
+  resetPositionEachCycle: 1
 --- !u!1 &1277083098
 GameObject:
   m_ObjectHideFlags: 0
@@ -1579,8 +1585,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 79178475e42b663ad8fbe7af94cb1a10, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  dt: 0.1
-  maxSpeed: 0.15
+  simulationDt: 0.1
+  maxSpeed: 0.2
+  enableLogging: 1
+  logInterval: 10
 --- !u!1 &1284484005
 GameObject:
   m_ObjectHideFlags: 0
@@ -1691,8 +1699,10 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2085ccd4d4e01dcfc91576ca77fd4697, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  dt: 0.1
-  velocity: 0.1
+  simulationDt: 0.1
+  velocity: 0.15
+  enableLogging: 0
+  logInterval: 10
 --- !u!4 &1468977057 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 8753101125198676622, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
