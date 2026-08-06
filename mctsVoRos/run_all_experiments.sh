@@ -42,8 +42,8 @@
 set -u
 
 NUM_EXP=10
-ALGORITHMS=("MCTS" "VO-TREE" "VO-PLANNER")
-TRAJECTORIES=("sinusoidal" "intention")
+ALGORITHMS=("VO-TREE" )
+TRAJECTORIES=("sinusoidal")
 FORCE=0
 SKIP_BUILD=0
 SKIP_SETUP=0
@@ -204,7 +204,7 @@ for traj in "${TRAJECTORIES[@]}"; do
                 --algorithm "${algo}" \
                 --trajectories "${traj}" \
                 ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"} \
-                > "${log_file}" 2>&1
+                2>&1 | tee "${log_file}"
 
             status=$?
             if [[ ${status} -ne 0 ]]; then

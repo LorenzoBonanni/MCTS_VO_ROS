@@ -19,6 +19,7 @@ from MCTS_VO.bettergym.agents.utils.utils import epsilon_uniform_uniform
 from MCTS_VO.bettergym.compiled_utils import dist_to_goal, get_points_from_lidar
 from MCTS_VO.environment_creator import create_pedestrian_env
 from geometry_msgs.msg import Twist
+from message_filters import ApproximateTimeSynchronizer, Subscriber
 from rclpy.node import Node
 from numba import jit
 from copy import deepcopy
@@ -28,6 +29,7 @@ from sensor_msgs.msg import LaserScan
 from skimage.measure import CircleModel, ransac
 from functools import partial
 from MCTS_VO.bettergym.agents.utils.vo import epsilon_uniform_uniform_vo
+from rclpy.time import Time
 
 
 parser = argparse.ArgumentParser()
@@ -389,19 +391,30 @@ class LoopHandler(Node):
         self.obs_rad = None
         self.heading_copy = None
         self.pos_copy = None
-        
-        self.odom_subscriber = self.create_subscription(
-            Odometry, 
-            'odom', 
-            self.callback_odom, 
-            rclpy.qos.qos_profile_sensor_data
+        self.latest_odom = None
+        self.latest_scan = None
+        # self.odom_subscriber = self.create_subscription(
+        #     Odometry, 
+        #     'odom', 
+        #     self.callback_odom, 
+        #     rclpy.qos.qos_profile_sensor_data
+        # )
+        # self.lidar_subscriber = self.create_subscription(
+        #     LaserScan, 
+        #     'scan', 
+        #     self.callback_lidar, 
+        #     rclpy.qos.qos_profile_sensor_data
+        # )
+        self.odom_sub = Subscriber(self, Odometry, '/odom')
+        self.scan_sub = Subscriber(self, LaserScan, '/scan')
+
+        self.sync = ApproximateTimeSynchronizer(
+            [self.odom_sub, self.scan_sub],
+            queue_size=10,
+            slop=0.01   # 10 ms, half the 20 ms period
         )
-        self.lidar_subscriber = self.create_subscription(
-            LaserScan, 
-            'scan', 
-            self.callback_lidar, 
-            rclpy.qos.qos_profile_sensor_data
-        )
+        self.sync.registerCallback(self._pair_callback)
+
         self.clusting_algo = HDBSCAN(allow_single_cluster= True, alpha=0.5, cluster_selection_epsilon=0.01, min_cluster_size=2, min_samples=1, n_jobs=-1)
         self.last_action = np.array([0., self.s0.x[2]])
         self.max_obs_vel = cli_args.max_obs_vel
@@ -423,6 +436,16 @@ class LoopHandler(Node):
         self.distances = None
         self.angles = None
 
+    def _pair_callback(self, odom_msg, scan_msg):
+        """Simply store the latest synchronised pair."""
+        self.latest_odom = odom_msg
+        self.latest_scan = scan_msg
+        # Temporary debug
+        self.get_logger().info(
+            f"[SYNC] pair received – odom ts: {odom_msg.header.stamp.sec}.{odom_msg.header.stamp.nanosec:09d}, "
+            f"scan ts: {scan_msg.header.stamp.sec}.{scan_msg.header.stamp.nanosec:09d}",
+            throttle_duration_sec=1.0   # log at most once per second
+        )
     
     def SetLaser(self, msg):
         """
@@ -530,7 +553,15 @@ class LoopHandler(Node):
                 continue
 
             # Use RANSAC to fit a circle model to the cluster points
-            ransac_model, _ = ransac(group, CircleModel, max_trials=100, min_samples=3, residual_threshold=0.1, stop_probability=0.99)
+            ransac_model, _ = ransac(
+                group, 
+                CircleModel, 
+                max_trials=100, 
+                min_samples=3, 
+                residual_threshold=0.1, 
+                stop_probability=0.99, 
+                rng=0
+            )
             if ransac_model is None:
                 continue
 
@@ -711,13 +742,27 @@ class LoopHandler(Node):
             - The robot's movement is controlled by publishing Twist messages.
         """
 
-        # Publish a stop command to ensure the robot starts from a stationary state
+        # 1. Stop the robot at the beginning of the thinking phase
         self.pub.publish(Twist())
 
-        # Check if odometry and lidar updates are available; if not, exit the loop
-        if not self.update_odom or not self.update_lidar:
+        # 2. Wait until at least one synchronised pair is available
+        if self.latest_odom is None or self.latest_scan is None:
+            self.get_logger().debug("control_loop: no pair yet, skipping")
             return
-        
+
+        # 3. Use the LATEST synchronised pair (this makes sensor data deterministic)
+        self.odom_msg = self.latest_odom
+        self.lidar_msg = self.latest_scan
+
+        # 4. Extract robot state 
+        self.robot_position, self.heading = self.get_odom()
+
+        # 5. Extract LiDAR data and compute collision (was in callback_lidar)
+        dist, angles = self.get_scan()
+        self.distances = dist
+        self.angles = angles
+        self.collision = min(dist) <= self.config.robot_radius  # exactly as before
+
         # Log the current step number
         self.logger.info(f"Step: {self.i}")
 
