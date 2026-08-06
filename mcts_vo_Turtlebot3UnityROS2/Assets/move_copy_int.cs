@@ -12,6 +12,7 @@ public class move_copy_int : MonoBehaviour
     private Vector3 goal = goal1;
     private int idx = 0;
     private float randNum = 0.0f;
+    public float velocity = 0.15f;
     // Start is called before the first frame update
     void Start()
     {
@@ -43,8 +44,7 @@ public class move_copy_int : MonoBehaviour
             // Y python = Unity -X
             Vector3 pos = transform.position;
             startPosition = transform.position;
-            
-            float velocity = 0.15f;
+
             Vector3 direction = (goal - pos).normalized;
             float goal_angle = Mathf.Atan2(direction.x, direction.z);
             float angle = goal_angle + randNum;

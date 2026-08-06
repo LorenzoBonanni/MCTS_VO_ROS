@@ -473,14 +473,11 @@ MonoBehaviour:
   m_GameObject: {fileID: 379139744}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: b55d0a0664a8a784badda5e383459427, type: 3}
+  m_Script: {fileID: 11500000, guid: 0b162456f218c609eaa7e255b595eb1c, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   dt: 0.1
-  amplitude: 0.2
-  frequency: 1
-  forwardSpeed: 0.05
-  multiplier: 1
+  velocity: 0.15
 --- !u!54 &433355419 stripped
 Rigidbody:
   m_CorrespondingSourceObject: {fileID: 8753101125338730103, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
@@ -1471,6 +1468,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   dt: 0.1
+  max_speed: 0.25
 --- !u!1 &1277083098
 GameObject:
   m_ObjectHideFlags: 0
@@ -1582,6 +1580,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   dt: 0.1
+  maxSpeed: 0.25
 --- !u!1 &1284484005
 GameObject:
   m_ObjectHideFlags: 0
@@ -1689,13 +1688,11 @@ MonoBehaviour:
   m_GameObject: {fileID: 1284484005}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 49f0386fb48d3ab29b3af70cafcff73c, type: 3}
+  m_Script: {fileID: 11500000, guid: 2085ccd4d4e01dcfc91576ca77fd4697, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
   dt: 0.1
-  amplitude: 0.2
-  frequency: 1
-  multiplier: 1
+  velocity: 0.15
 --- !u!4 &1468977057 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 8753101125198676622, guid: 7eff1578132243c24a41db94d126abc3, type: 3}

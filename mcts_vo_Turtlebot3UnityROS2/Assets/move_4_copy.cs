@@ -14,6 +14,7 @@ public class move_4_copy : MonoBehaviour
     public float forwardSpeed = 0.1f;
     private int mulForwardSpeed = 1;
     public int multiplier = 1;
+    public float maxSpeed = 0.15f;
 
     // The random speed is only redrawn every second completed movement step
     // and reused for the intermediate step in between.
@@ -40,7 +41,7 @@ public class move_4_copy : MonoBehaviour
             // reuse it for the step in between.
             if (speedStepCount % 100 == 0)
             {
-                forwardSpeed = mulForwardSpeed * Random.Range(0.05f, 0.15f);
+                forwardSpeed = mulForwardSpeed * Random.Range(0.05f, maxSpeed);
             }
             speedStepCount++;
             // Sinusoidal trajectory: apply the change in the sinusoidal

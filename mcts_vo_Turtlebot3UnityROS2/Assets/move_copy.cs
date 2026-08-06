@@ -19,6 +19,7 @@ public class move_copy : MonoBehaviour
     // The random speed is only redrawn every second completed movement step
     // and reused for the intermediate step in between.
     private int speedStepCount = 0;
+    public float maxSpeed = 0.15f;
 
     // The outward leg is recorded step by step, then replayed forwards and
     // backwards for ever, so the obstacle retraces exactly the path it drove
@@ -44,7 +45,7 @@ public class move_copy : MonoBehaviour
             // completed movement step; reuse it for the step in between.
             if (speedStepCount % 100 == 0)
             {
-                forwardSpeed = mulForwardSpeed * Random.Range(0.0f, 0.15f);
+                forwardSpeed = mulForwardSpeed * Random.Range(0.0f, maxSpeed);
             }
             speedStepCount++;
             // Sinusoidal trajectory: apply the change in the sinusoidal

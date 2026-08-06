@@ -1,7 +1,7 @@
 # Ubuntu 20.04 / ROS 2 Foxy / Python 3.8 - the same triple the experiments were
 # recorded on. Do not move to a newer ROS: the pinned numba/numpy wheels are
 # built for 3.8, and the recorded data would no longer be comparable.
-FROM ros:foxy-ros-base
+FROM docker.io/library/ros:foxy-ros-base
 
 ARG DEBIAN_FRONTEND=noninteractive
 

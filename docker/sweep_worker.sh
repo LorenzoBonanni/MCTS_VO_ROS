@@ -70,6 +70,31 @@ SCENE="${scenes[$scene_idx]}"
 NAME="rs${RS}_g${GAMMA}_c${C}"
 
 # --------------------------------------------------
+# 1.5 ROS
+# --------------------------------------------------
+# The container engine does NOT run the image's ENTRYPOINT - it execs the
+# command it is given - and docker/entrypoint.sh is the only thing that sources
+# ROS. Without this, loopHandler dies on "No module named 'rclpy'".
+#
+# Sourcing it here rather than calling the entrypoint, because the entrypoint
+# also hardcodes the docker mount point (/ws/src/MCTS_VO_ROS) and would reject
+# a checkout mounted anywhere else. Nothing else in it is needed: python puts
+# the script's own directory first on sys.path, and that directory is the
+# symlink farm below, so debug_utils and MCTS_VO resolve without PYTHONPATH.
+#
+# set +eu around it: the ROS setup scripts read unbound variables and return
+# non-zero in places that are not errors.
+set +eu
+# shellcheck disable=SC1091
+source "${ROS_SETUP:-/opt/ros/foxy/setup.bash}"
+set -e
+
+python3 -c 'import rclpy' 2>/dev/null || {
+    echo "rclpy still not importable after sourcing ${ROS_SETUP:-/opt/ros/foxy/setup.bash}" >&2
+    exit 1
+}
+
+# --------------------------------------------------
 # 2. Isolation between the tasks sharing this node
 # --------------------------------------------------
 # THIS IS THE ONE THAT WILL BITE. Under docker each run had its own network
@@ -78,7 +103,7 @@ NAME="rs${RS}_g${GAMMA}_c${C}"
 # one DDS bus: every planner would see every Unity's /scan and /odom. A domain
 # id per task puts them on separate ports, and localhost-only keeps discovery
 # off the fabric so that tasks on OTHER nodes cannot join either.
-export ROS_DOMAIN_ID=$(( SLURM_PROCID % 100 ))
+export ROS_DOMAIN_ID=$(( (SLURM_ARRAY_TASK_ID + SLURM_PROCID) % 101 ))
 export ROS_LOCALHOST_ONLY=1
 
 # Numba compiles on first use and caches to disk. Eight tasks writing one cache
@@ -86,7 +111,15 @@ export ROS_LOCALHOST_ONLY=1
 export NUMBA_CACHE_DIR="/tmp/numba-$SLURM_PROCID"
 export MPLCONFIGDIR="/tmp/mpl-$SLURM_PROCID"
 mkdir -p "$NUMBA_CACHE_DIR" "$MPLCONFIGDIR"
-
+# rclpy creates $HOME/.ros/log at init. The EDF sets HOME=/root for every task,
+# so 16 tasks race to create the same directory on run 0 and most lose:
+#   RCLError: Failed to create log directory: /root/.ros/log
+# One per task, node-local. Unity's prefs want the same treatment.
+export HOME="/tmp/home-$SLURM_PROCID"
+export ROS_HOME="$HOME/.ros"
+export ROS_LOG_DIR="$ROS_HOME/log"
+export XDG_CONFIG_HOME="$HOME/.config"
+mkdir -p "$ROS_LOG_DIR" "$XDG_CONFIG_HOME"
 export MPLBACKEND=Agg
 
 # THE OTHER ONE THAT WILL BITE, on a 64-core node. estimate_obstacles builds
@@ -137,6 +170,14 @@ EOF
 
 cd "$WORK"
 
+# 16 tasks first-touching scipy in the image simultaneously can leave the
+# import half-done - "partially initialized module scipy.linalg". Only ever
+# run 0, never after the pages are cached. Stagger the cold start and warm
+# the imports where a failure costs nothing.
+sleep $(( SLURM_PROCID * 2 ))
+python3 -c 'import scipy.linalg, sklearn.cluster, numba' 2>/dev/null \
+  || python3 -c 'import scipy.linalg, sklearn.cluster, numba'
+
 echo "task $task_id: $NAME | $SCENE | runs 0..$(( NUM_EXP - 1 ))"
 echo "  node $(hostname)  proc $SLURM_PROCID  ROS_DOMAIN_ID=$ROS_DOMAIN_ID"
 echo "  work $WORK"
@@ -156,17 +197,32 @@ for (( exp_num = 0; exp_num < NUM_EXP; exp_num++ )); do
         continue
     fi
 
-    python3 loopHandler_copy.py \
-        --algorithm "$ALGORITHM" \
-        --trajectories "$SCENE" \
-        --exp_num "$exp_num" \
-        --env-render headless \
-        --no-plots \
-        --radius-scale "$RS" \
-        --gamma-per-second "$GAMMA" \
-        --exploration-c "$C" \
-        > "$log" 2>&1 || true
+    : > "$log"                       # truncate once, so both attempts are kept
+    for attempt in 1 2; do
+        echo "=== attempt $attempt ===" >> "$log"
 
+        # set +e around it: with set -e on, a run that dies would take the
+        # whole task down instead of being retried, and $? has to be read
+        # before anything else touches it - "|| true" would overwrite it.
+        set +e
+        python3 loopHandler_copy.py \
+            --algorithm "$ALGORITHM" \
+            --trajectories "$SCENE" \
+            --exp_num "$exp_num" \
+            --env-render headless \
+            --no-plots \
+            --radius-scale "$RS" \
+            --gamma-per-second "$GAMMA" \
+            --exploration-c "$C" \
+            >> "$log" 2>&1
+        rc=$?
+        set -e
+
+        echo "=== exit status $rc ===" >> "$log"
+        [[ -f "$csv" ]] && break
+        echo "  run $exp_num attempt $attempt: exit $rc, no data" >&2
+    done
+    	
     # loopHandler finishes by raising and catching an exception, so a normal end
     # and a crash look alike from outside. The CSV is the real signal.
     if [[ -f "$csv" ]]; then

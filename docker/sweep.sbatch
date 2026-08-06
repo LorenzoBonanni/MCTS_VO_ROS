@@ -32,10 +32,14 @@
 
 # PATHS HERE ARE THE CONTAINER'S, not the host's. This script body runs
 # outside the container - only the srun step below is inside it - so it must
-# not touch these paths itself, just hand them on. /root/sweeps is where the
-# EDF mounts ${OUTPUT_SCRATCH}/mctsvo/sweeps; the worker creates what it needs
-# once it is inside.
-export SWEEP_DIR="${SWEEP_DIR:-/root/sweeps/$SLURM_ARRAY_JOB_ID}"
+# not touch these paths itself, just hand them on. /root/sweep is where the EDF
+# mounts ${OUTPUT_SCRATCH}/sweep; the worker creates what it needs once inside.
+#
+# One fixed directory rather than one per job id, because the worker skips any
+# run whose CSV is already there: resubmitting after a wall-clock kill then
+# carries on instead of starting the grid again. Pass SWEEP_DIR=/root/sweep/$(date +%F)
+# to keep a submission separate.
+export SWEEP_DIR="${SWEEP_DIR:-/root/sweep}"
 
 # The checkout, as the EDF mounts it.
 export MCTSVO_REPO="${MCTSVO_REPO:-/workspace/MCTS_VO_ROS}"

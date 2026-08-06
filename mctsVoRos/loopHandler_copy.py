@@ -39,7 +39,7 @@ parser.add_argument('--trajectories', default='sinusoidal', type=str,
                     help='Type of obstacle trajectories, i.e. which Unity '
                          'environment to launch. Also determines the output '
                          'directory (debug/<trajectories>).')
-parser.add_argument('--max-obs-vel', default=0.15, type=float,
+parser.add_argument('--max-obs-vel', default=0.1, type=float,
                     help='Maximum obstacle speed the velocity obstacles are '
                          'sized for. This MUST be >= the fastest obstacle in '
                          'the scene or the safety guarantee does not hold: '
@@ -120,8 +120,8 @@ parser.add_argument('--env-render', default='headless', type=str,
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
-    'sinusoidal': '../env_build/INT/int.x86_64',
-    'intention': '../env_build/SIN/sin.x86_64',
+    'intention': '../env_build/INT/int.x86_64',
+    'sinusoidal': '../env_build/SIN/sin.x86_64',
 }
 # The pre-fix builds, kept reachable by path through --env-build. Their
 # obstacles step on the frame clock, so they run at about half speed whenever

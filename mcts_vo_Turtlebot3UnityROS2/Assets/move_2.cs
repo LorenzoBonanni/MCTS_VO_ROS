@@ -33,6 +33,7 @@ public class move_2 : MonoBehaviour
     private List<Vector3> steps = new List<Vector3>();
     private bool recording = true;
     private int phase = 0;
+    public float max_speed = 0.15f;
     // Start is called before the first frame update
     void Start()
     {
@@ -61,7 +62,7 @@ public class move_2 : MonoBehaviour
         else {
             if (velocityStepCount % 100 == 0)
             {
-                currentSpeed = Random.Range(0.10f, 0.25f);
+                currentSpeed = Random.Range(0.10f, max_speed);
             }
             velocityStepCount += 1;
             return currentSpeed;

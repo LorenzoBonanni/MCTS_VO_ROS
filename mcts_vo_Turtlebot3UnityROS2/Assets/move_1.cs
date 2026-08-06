@@ -22,6 +22,7 @@ public class move_1 : MonoBehaviour
     private int seg3 = 28;
     private int seg4 = 40;
     private int maxIdx = 80;
+    public float maxSpeed = 0.15f;
 
     // The random speed is only redrawn every second completed movement step
     // (velocity > 0 steps) and reused for the intermediate step, so
@@ -69,7 +70,7 @@ public class move_1 : MonoBehaviour
         else {
             if (velocityStepCount % 100 == 0)
             {
-                currentSpeed = Random.Range(0.10f, 0.25f);
+                currentSpeed = Random.Range(0.10f, maxSpeed);
             }
             velocityStepCount += 1;
             return currentSpeed;
