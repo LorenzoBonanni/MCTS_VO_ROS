@@ -54,18 +54,27 @@ echo "summarised $n parameter sets"
 # directory name, which is the only place they are recorded for certain.
 # --------------------------------------------------
 combine() {   # $1 = per-set file, $2 = combined file
-    local first=1 f name rs g c
+    local first=1 f name rs g c vo
     : > "$SWEEP_DIR/$2"
     for d in "$SWEEP_DIR"/rs*/; do
         f="$d/$1"
         [ -f "$f" ] || continue
         name="$(basename "$d")"
+        # Every field is taken up to the next underscore, never to the end of
+        # the name: the name gained a _vo suffix, and "${name##*_c}" would have
+        # swallowed it into c.
         rs="${name#rs}"; rs="${rs%%_*}"
         g="${name#*_g}"; g="${g%%_*}"
-        c="${name##*_c}"
-        awk -v n="$name" -v rs="$rs" -v g="$g" -v c="$c" -v first="$first" '
-            NR == 1 { if (first) print "config,radius_scale,gamma_per_second,exploration_c," $0; next }
-            { print n "," rs "," g "," c "," $0 }' "$f" >> "$SWEEP_DIR/$2"
+        c="${name#*_c}"; c="${c%%_*}"
+        # Sweeps predating the VO A/B have no _vo suffix; they are all the old
+        # geometry, but say so rather than guessing.
+        case "$name" in
+            *_vo*) vo="${name##*_vo}" ;;
+            *)     vo="unknown" ;;
+        esac
+        awk -v n="$name" -v rs="$rs" -v g="$g" -v c="$c" -v vo="$vo" -v first="$first" '
+            NR == 1 { if (first) print "config,radius_scale,gamma_per_second,exploration_c,vo_geometry," $0; next }
+            { print n "," rs "," g "," c "," vo "," $0 }' "$f" >> "$SWEEP_DIR/$2"
         first=0
     done
 }

@@ -9,8 +9,14 @@
 #SBATCH --partition=normal
 #SBATCH --job-name=mctsvo-sweep
 #SBATCH --time=06:00:00
-# 4 rs * 4 gamma * 4 c * 2 scenes * 2 VO geometries = 256 cells
-#SBATCH --array=0-255:16
+# 4 rs * 4 gamma * 4 c * 2 scenes * 2 VO geometries = 256 cells.
+# sweep_worker.sh computes task_id = SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID, so
+# with --ntasks-per-node=8 the array index runs 0..(256/8 - 1) and the task ids
+# tile 0..255 exactly. Do NOT add a step (--array=0-255:16): the multiply by 8
+# means a stepped index lands beyond the grid and the worker exits with
+# "nothing to do", running a handful of cells instead of all of them. To limit
+# how many run at once use %N, which throttles without skipping.
+#SBATCH --array=0-31
 #SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/sweep_%A_%a.out
 
 export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed

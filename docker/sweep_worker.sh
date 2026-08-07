@@ -16,10 +16,8 @@ if [[ -z "${SLURM_ARRAY_TASK_ID}" || -z "${SLURM_PROCID}" ]]; then
 fi
 task_id=$(( SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID ))
 
-: "${SWEEP_DIR:?export SWEEP_DIR}"
-REPO="${MCTSVO_REPO:-/workspace/MCTS_VO_ROS}"
-NUM_EXP="${NUM_EXP:-20}"
-ALGORITHM="${ALGORITHM:-VO-TREE}"
+: "${SWEEP_DIR:?export SWEEP_DIR}"          # now guaranteed by sweep.sbatch
+REPO="$MCTSVO_REPO"                         # no fallback; exported by sweep.sbatch
 
 # --------------------------------------------------
 # 1. The grid. ONE CELL PER TASK: the run number is NOT part of the index, the
@@ -29,10 +27,8 @@ rs_values=(1.4 1.8 2.2 2.6)
 gamma_values=(0.65 0.81 0.90 0.95)
 c_values=(0.5 1.0 2.0 5.0)
 scenes=(sinusoidal_complex intention_complex)
-# The VO geometry A/B. Overridable from sweep.sbatch so the comparison can be
-# dropped without editing this file; the other four lists are still hard-coded
-# here and ignore their RS_VALS/GAMMA_VALS/C_VALS/TRAJECTORIES exports.
-IFS=' ' read -ra vo_values <<< "${VO_GEOMETRIES:-paper legacy}"
+# VO geometry comes from the exported VO_GEOMETRIES; no default any more
+IFS=' ' read -ra vo_values <<< "$VO_GEOMETRIES"
 
 num_rs=${#rs_values[@]}
 num_gamma=${#gamma_values[@]}
@@ -46,9 +42,12 @@ if (( task_id >= total_cells )); then
     exit 0
 fi
 
-# summarize_sweep.sh reads configs.tsv and there is nothing else on the cluster
-# to write it. The first task of the first array job does it, once: any other
-# task would be racing, and every task has the same lists anyway.
+# configs.tsv is the grid manifest. Nothing reads it any more -
+# summarize_sweep_slurm.sh recovers the parameters from the directory names -
+# but it is the one place the intended grid is recorded, which matters when a
+# sweep is only partly finished and the directories are therefore incomplete.
+# The first task of the first array job writes it, once: any other task would
+# be racing, and every task has the same lists anyway.
 if (( SLURM_ARRAY_TASK_ID == 0 && SLURM_PROCID == 0 )); then
     mkdir -p "$SWEEP_DIR"
     {
@@ -136,8 +135,8 @@ RADIUS_SCALE=$RS
 GAMMA=$GAMMA
 EXPLORATION_C=$C
 VO_GEOMETRY=$VO
-MAX_OBS_RADIUS=${MAX_OBS_RADIUS:-0.5}
-MAX_OBS_VEL=${MAX_OBS_VEL:-0.25}
+MAX_OBS_RADIUS=$MAX_OBS_RADIUS
+MAX_OBS_VEL=$MAX_OBS_VEL
 EOF
 
 cd "$WORK"
@@ -178,8 +177,8 @@ for (( exp_num = 0; exp_num < NUM_EXP; exp_num++ )); do
             --gamma-per-second "$GAMMA" \
             --exploration-c "$C" \
             --vo-geometry "$VO" \
-            --max-obs-radius "${MAX_OBS_RADIUS:-0.5}" \
-            --max-obs-vel "${MAX_OBS_VEL:-0.25}" \
+            --max-obs-radius "$MAX_OBS_RADIUS" \
+            --max-obs-vel "$MAX_OBS_VEL" \
             >> "$log" 2>&1
         rc=$?
         set -e
