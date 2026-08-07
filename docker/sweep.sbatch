@@ -20,7 +20,11 @@
 #SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/sweep_%A_%a.out
 
 export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
-export TRAJECTORIES="sinusoidal intention"
+# The scene names are directory names under debug/ and keys of ENV_BUILDS in
+# loopHandler_copy.py. These are the _complex variants, which is what every
+# sweep so far has actually run: sweep_worker.sh used to hard-code them and
+# ignore this export, which read "sinusoidal intention" - the easy scenes.
+export TRAJECTORIES="sinusoidal_complex intention_complex"
 export RS_VALS="1.4 1.8 2.2 2.6"
 export GAMMA_VALS="0.65 0.81 0.90 0.95"
 export C_VALS="0.5 1.0 2.0 5.0"
@@ -30,8 +34,14 @@ export C_VALS="0.5 1.0 2.0 5.0"
 # the same scenes and the same seeds, so the difference is attributable.
 # Set to just "paper" to halve the grid once the comparison is settled.
 export VO_GEOMETRIES="paper legacy"
-export NUM_EXP=100                 # independent seeds per combination
-export MAX_OBS_VEL=0.1
+export NUM_EXP=50                 # independent seeds per combination
+# Must be >= the fastest obstacle in the scene or the VO safety guarantee does
+# not hold. The .unity files override the script defaults: max_speed/maxSpeed
+# are 0.2 on the fastest instances in both complex scenes (the 0.15f in the
+# move_*.cs sources is a default, not the live value). 0.25 clears that with
+# margin. A previous sweep ran at 0.1 - half the true maximum - which undersized
+# every collision cone by v*(dt+think_margin) = 0.02 m.
+export MAX_OBS_VEL=0.25
 # Largest RANSAC-fitted obstacle radius kept, applied to the measured radius
 # before --radius-scale inflates it. Filtering after the scaling, as the code
 # used to, made the effective cutoff MAX_OBS_RADIUS/rs, which coupled this to

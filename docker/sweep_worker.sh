@@ -3,8 +3,12 @@
 # One cell of the sweep: one (rs, gamma, c, scene), every run number for it.
 # Launched by sweep.sbatch through srun, one per task on the node.
 #
-# Set SLURM_ARRAY_TASK_ID and SLURM_PROCID by hand to run a single cell:
-#   SLURM_ARRAY_TASK_ID=0 SLURM_PROCID=0 SWEEP_DIR=/scratch/... ./sweep_worker.sh
+# Every parameter comes from sweep.sbatch's exports; this script defines no
+# defaults and refuses to start without them. To run a single cell by hand,
+# source those exports first:
+#
+#   set -a; . <(grep '^export ' docker/sweep.sbatch); set +a
+#   SLURM_ARRAY_TASK_ID=0 SLURM_PROCID=0 ./sweep_worker.sh
 set -e
 
 # --------------------------------------------------
@@ -16,19 +20,38 @@ if [[ -z "${SLURM_ARRAY_TASK_ID}" || -z "${SLURM_PROCID}" ]]; then
 fi
 task_id=$(( SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID ))
 
-: "${SWEEP_DIR:?export SWEEP_DIR}"          # now guaranteed by sweep.sbatch
-REPO="$MCTSVO_REPO"                         # no fallback; exported by sweep.sbatch
+# Every one of these is set by sweep.sbatch. They are checked up front, and with
+# no defaults: a missing grid variable used to produce a zero-length array, hence
+# num_* == 0 and a division by zero forty lines below, which says nothing about
+# what is actually wrong.
+: "${SWEEP_DIR:?export SWEEP_DIR}"
+: "${MCTSVO_REPO:?export MCTSVO_REPO}"
+: "${RS_VALS:?export RS_VALS}"
+: "${GAMMA_VALS:?export GAMMA_VALS}"
+: "${C_VALS:?export C_VALS}"
+: "${TRAJECTORIES:?export TRAJECTORIES}"
+: "${VO_GEOMETRIES:?export VO_GEOMETRIES}"
+: "${ALGORITHM:?export ALGORITHM}"
+: "${NUM_EXP:?export NUM_EXP}"
+: "${MAX_OBS_VEL:?export MAX_OBS_VEL}"
+: "${MAX_OBS_RADIUS:?export MAX_OBS_RADIUS}"
+REPO="$MCTSVO_REPO"
 
 # --------------------------------------------------
 # 1. The grid. ONE CELL PER TASK: the run number is NOT part of the index, the
 #    loop at the bottom covers it.
+#
+#    Every axis comes from sweep.sbatch. These lists used to be hard-coded here
+#    while sweep.sbatch exported RS_VALS/GAMMA_VALS/C_VALS/TRAJECTORIES that
+#    nothing read, so editing the sbatch changed nothing and the two files could
+#    disagree silently - which they did: the sbatch said "sinusoidal intention"
+#    while every sweep actually ran on the _complex scenes.
 # --------------------------------------------------
-rs_values=(1.4 1.8 2.2 2.6)
-gamma_values=(0.65 0.81 0.90 0.95)
-c_values=(0.5 1.0 2.0 5.0)
-scenes=(sinusoidal_complex intention_complex)
-# VO geometry comes from the exported VO_GEOMETRIES; no default any more
-IFS=' ' read -ra vo_values <<< "$VO_GEOMETRIES"
+IFS=' ' read -ra rs_values    <<< "$RS_VALS"
+IFS=' ' read -ra gamma_values <<< "$GAMMA_VALS"
+IFS=' ' read -ra c_values     <<< "$C_VALS"
+IFS=' ' read -ra scenes       <<< "$TRAJECTORIES"
+IFS=' ' read -ra vo_values    <<< "$VO_GEOMETRIES"
 
 num_rs=${#rs_values[@]}
 num_gamma=${#gamma_values[@]}
