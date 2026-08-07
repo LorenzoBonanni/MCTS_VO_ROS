@@ -26,7 +26,7 @@ log() { printf '%s  %s\n' "$(date +%H:%M:%S)" "$*" | tee -a "${OUT}/sweep.log"; 
 # ---------------------------------------------------------------------------
 log "summarising"
 SUM_FAILURES=0
-while IFS=$'\t' read -r name rs g c; do
+while IFS=$'\t' read -r name rs g c vo; do
     docker run --rm -v "${REPO}:${MOUNT}" -v "${OUT}:/sweep" \
         -w "${MOUNT}/mctsVoRos" "${IMAGE}" \
         python3 summarize_debug.py --no-archive \
@@ -39,12 +39,12 @@ done < <(tail -n +2 "${CONFIGS_TSV}")
 combine() {   # $1 = per-config file name, $2 = combined file name
     local first=1
     : > "${OUT}/$2"
-    while IFS=$'\t' read -r name rs g c; do
+    while IFS=$'\t' read -r name rs g c vo; do
         local f="${OUT}/${name}/$1"
         [ -f "${f}" ] || continue
-        awk -v n="${name}" -v rs="${rs}" -v g="${g}" -v c="${c}" -v first="${first}" '
-            NR == 1 { if (first) print "config,radius_scale,gamma_per_second,exploration_c," $0; next }
-            { print n "," rs "," g "," c "," $0 }' "${f}" >> "${OUT}/$2"
+        awk -v n="${name}" -v rs="${rs}" -v g="${g}" -v c="${c}" -v vo="${vo}" -v first="${first}" '
+            NR == 1 { if (first) print "config,radius_scale,gamma_per_second,exploration_c,vo_geometry," $0; next }
+            { print n "," rs "," g "," c "," vo "," $0 }' "${f}" >> "${OUT}/$2"
         first=0
     done < <(tail -n +2 "${CONFIGS_TSV}")
 }

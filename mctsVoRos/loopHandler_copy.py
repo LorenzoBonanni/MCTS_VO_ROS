@@ -19,7 +19,6 @@ from MCTS_VO.bettergym.agents.utils.utils import epsilon_uniform_uniform
 from MCTS_VO.bettergym.compiled_utils import dist_to_goal, get_points_from_lidar
 from MCTS_VO.environment_creator import create_pedestrian_env
 from geometry_msgs.msg import Twist
-from message_filters import ApproximateTimeSynchronizer, Subscriber
 from rclpy.node import Node
 from numba import jit
 from copy import deepcopy
@@ -28,7 +27,7 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from skimage.measure import CircleModel, ransac
 from functools import partial
-from MCTS_VO.bettergym.agents.utils.vo import epsilon_uniform_uniform_vo
+from MCTS_VO.bettergym.agents.utils.vo import epsilon_uniform_uniform_vo, set_legacy_vo
 from rclpy.time import Time
 
 
@@ -69,6 +68,22 @@ parser.add_argument('--radius-scale', default=1.8, type=float,
                          'compensating for a front-facing arc under-estimating '
                          'the true radius. Too large and VO prunes away every '
                          'forward heading, leaving the robot stopped.')
+parser.add_argument('--vo-geometry', default='paper', type=str,
+                    choices=['paper', 'legacy'],
+                    help='Which velocity-obstacle geometry to plan with. '
+                         '"paper" follows Algorithm 4: tangents to the ball of '
+                         'radius r1, obstacles beyond r0 + r1 ignored, trapped '
+                         'below r1. "legacy" restores the geometry used up to '
+                         'and including the 180-run campaign, which took '
+                         'tangents to r0 + r1 and ignored beyond 1.6*(r0 + r1); '
+                         'pass it to A/B the correction on identical scenes.')
+parser.add_argument('--max-obs-radius', default=0.5, type=float,
+                    help='Largest RANSAC-fitted obstacle radius accepted, in '
+                         'metres. Applied to the *measured* radius, before '
+                         '--radius-scale inflates it, so that the two knobs are '
+                         'independent: raising the scale widens the safety '
+                         'margin without also narrowing what counts as an '
+                         'obstacle. Fits above this are usually walls.')
 parser.add_argument('--rollout-collision', default='check', type=str,
                     choices=['check', 'none'],
                     help="Whether a rollout terminates on collision. 'check' "
@@ -117,8 +132,29 @@ parser.add_argument('--env-render', default='headless', type=str,
                          "50 Hz: 'full' (Ultra + vSync, the old behaviour) gives "
                          "16.8 Hz, 'low' gives 39.4 Hz and is still watchable, "
                          "'headless' gives 49.7 Hz. Since control_loop skips a "
-                         'tick whenever no new scan has arrived, that rate is '
-                         'the hard floor on the cycle time: cycle >= 2/rate.')
+                         'tick whenever the sensor data is older than one cycle, '
+                         'that rate is the hard floor on the cycle time: '
+                         'cycle >= 2/rate. NOTE the scenes currently in '
+                         'env_build/ are NOT configured for 50 Hz: '
+                         'turtlebot3_burger.prefab sets ScanningFrequency and '
+                         'OdometryPublishingFrequency to 10, and both topics were '
+                         'measured at 10.0 Hz under headless.')
+parser.add_argument('--max-sensor-age', default=None, type=float,
+                    help='Reject sensor data older than this many seconds and '
+                         'hold position instead of planning on it. Defaults to '
+                         'one control cycle, ts + think_margin, which is the '
+                         'horizon the velocity obstacles are sized for: data '
+                         'older than that breaks the assumption the safety '
+                         'argument rests on. Measured fresh data is 27-94 ms '
+                         'old, so the default leaves a factor of two.')
+parser.add_argument('--diag', action='store_true',
+                    help='Record where each cycle got its sensor data from: the '
+                         'sequence number of the synchronised pair, the age of '
+                         'each message, and raw per-topic arrival counters read '
+                         'independently of the message filter. Tells apart "the '
+                         'simulator stopped publishing" from "the synchroniser '
+                         'stopped matching". Adds two subscriptions, so it is '
+                         'off unless asked for.')
 
 # Unity build associated to each type of obstacle trajectory
 ENV_BUILDS = {
@@ -187,8 +223,18 @@ algorithm = cli_args.algorithm
 trajectories = cli_args.trajectories
 EXPLORATION_C = cli_args.exploration_c
 RADIUS_SCALE = cli_args.radius_scale
+MAX_OBS_RADIUS = cli_args.max_obs_radius
+LEGACY_VO = cli_args.vo_geometry == 'legacy'
+# Applied at import time, i.e. before any environment or planner is built, so
+# that no code path can observe the default first.
+set_legacy_vo(LEGACY_VO)
 ROLLOUT_COLLISION_CHECK = cli_args.rollout_collision == 'check'
 collect_trajectories = cli_args.collect_trajectories
+DIAG = cli_args.diag
+# One control cycle by default: the robot is stopped for think_margin and moves
+# for ts, and the VO radii cover obstacle motion over exactly that span.
+MAX_SENSOR_AGE = (dt + THINK_MARGIN if cli_args.max_sensor_age is None
+                  else cli_args.max_sensor_age)
 
 # The discount is specified per second and converted to per step, so that the
 # effective horizon is a property of the problem rather than of the control
@@ -397,27 +443,56 @@ class LoopHandler(Node):
         self.pos_copy = None
         self.latest_odom = None
         self.latest_scan = None
-        # self.odom_subscriber = self.create_subscription(
-        #     Odometry, 
-        #     'odom', 
-        #     self.callback_odom, 
-        #     rclpy.qos.qos_profile_sensor_data
-        # )
-        # self.lidar_subscriber = self.create_subscription(
-        #     LaserScan, 
-        #     'scan', 
-        #     self.callback_lidar, 
-        #     rclpy.qos.qos_profile_sensor_data
-        # )
-        self.odom_sub = Subscriber(self, Odometry, '/odom')
-        self.scan_sub = Subscriber(self, LaserScan, '/scan')
-
-        self.sync = ApproximateTimeSynchronizer(
-            [self.odom_sub, self.scan_sub],
-            queue_size=10,
-            slop=0.01   # 10 ms, half the 20 ms period
+        # Two independent subscriptions, each keeping only the newest message.
+        #
+        # This replaces an ApproximateTimeSynchronizer with slop=0.01, which was
+        # measured emitting no pair at all for 11-13 s at a stretch, three times in
+        # a 69 s episode, while both topics kept delivering without dropping a
+        # single message. The two publishers are stamped from different Unity
+        # callbacks - the scanner from Update, odometry from FixedUpdate - each
+        # driven by its own WaitForSeconds coroutine, so their relative phase
+        # drifts freely. Pairing them within 10 ms of a 100 ms period therefore
+        # succeeds only while the drift happens to sit inside the window, which is
+        # what produced the blackouts. Any slop is a bet on that drift; not pairing
+        # at all removes the failure instead of making it rarer.
+        #
+        # The loop never needed simultaneity, only recency: it reads one pose and
+        # one scan per cycle and treats them as the current world state. Recency is
+        # checked below, per topic, against each message's own stamp - which is
+        # immune to the drift, being a comparison against the clock rather than
+        # against the other topic.
+        #
+        # qos_profile_sensor_data, i.e. best-effort, as the original subscriptions
+        # used: for a sensor stream the newest sample is what matters, and a
+        # reliable reader would have DDS retransmit and apply backpressure while
+        # control_loop spends its 75 ms planning.
+        self.odom_subscriber = self.create_subscription(
+            Odometry,
+            '/odom',
+            self._on_odom,
+            rclpy.qos.qos_profile_sensor_data
         )
-        self.sync.registerCallback(self._pair_callback)
+        self.lidar_subscriber = self.create_subscription(
+            LaserScan,
+            '/scan',
+            self._on_scan,
+            rclpy.qos.qos_profile_sensor_data
+        )
+
+        # Diagnostics. pair_seq counts what the synchroniser emits; raw_odom and
+        # raw_scan count what arrives on the topics at all. The two together say
+        # whether a cycle went stale because nothing was published or because
+        # nothing matched, which is not decidable from the recorded runs.
+        self.pair_seq = 0
+        self.raw_odom = 0
+        self.raw_scan = 0
+        self.prev_pair_seq = -1
+        self.stale_skips = 0
+        if DIAG:
+            self.diag_odom_sub = self.create_subscription(
+                Odometry, '/odom', self._count_odom, rclpy.qos.qos_profile_sensor_data)
+            self.diag_scan_sub = self.create_subscription(
+                LaserScan, '/scan', self._count_scan, rclpy.qos.qos_profile_sensor_data)
 
         self.clusting_algo = HDBSCAN(allow_single_cluster= True, alpha=0.5, cluster_selection_epsilon=0.01, min_cluster_size=2, min_samples=1, n_jobs=-1)
         self.last_action = np.array([0., self.s0.x[2]])
@@ -440,10 +515,29 @@ class LoopHandler(Node):
         self.distances = None
         self.angles = None
 
-    def _pair_callback(self, odom_msg, scan_msg):
-        """Simply store the latest synchronised pair."""
-        self.latest_odom = odom_msg
-        self.latest_scan = scan_msg
+    def _on_odom(self, msg):
+        """Keep the newest odometry message."""
+        self.latest_odom = msg
+        self.pair_seq += 1
+
+    def _on_scan(self, msg):
+        """Keep the newest scan."""
+        self.latest_scan = msg
+
+    def _count_odom(self, _msg):
+        """Raw arrival counter, deliberately bypassing the message filter."""
+        self.raw_odom += 1
+
+    def _count_scan(self, _msg):
+        self.raw_scan += 1
+
+    @staticmethod
+    def _stamp_age(now_ns, msg):
+        """Seconds between a message's header stamp and now, NaN if unavailable."""
+        if msg is None:
+            return float('nan')
+        st = msg.header.stamp
+        return (now_ns - (st.sec * 1_000_000_000 + st.nanosec)) / 1e9
 
         
     def SetLaser(self, msg):
@@ -525,8 +619,9 @@ class LoopHandler(Node):
             - obs_rad (np.ndarray): Array of shape (N,) with obstacle radii.
         Notes:
             - Clusters with fewer than 3 points are ignored.
-            - Obstacles with radii > 0.5 are filtered out.
-            - Detected radii are scaled by RADIUS_SCALE.
+            - Obstacles whose measured radius exceeds MAX_OBS_RADIUS are
+              filtered out, before any scaling.
+            - Surviving radii are then scaled by RADIUS_SCALE.
         """
 
         # If no distance data is available, return empty arrays
@@ -568,16 +663,19 @@ class LoopHandler(Node):
             center = ransac_model.params[0:2]
             radius = ransac_model.params[2]
 
-            # Scale the radius by a predefined factor
-            radius *= RADIUS_SCALE
-
-            # Append the center and radius to the respective arrays
+            # Append the center and the *measured* radius to the respective
+            # arrays. The RADIUS_SCALE inflation is applied after the filter
+            # below, not here, so that the two knobs stay independent.
             obs_pos = np.vstack((obs_pos, center))
             obs_rad = np.append(obs_rad, radius)
 
-        # Filter out obstacles with radii greater than 0.5
-        mask = obs_rad <= 0.5
-        obs_rad = obs_rad[mask]
+        # Discard implausibly large fits - walls, mostly - on the measured
+        # radius. Filtering the scaled radius instead would make the effective
+        # cutoff MAX_OBS_RADIUS / RADIUS_SCALE, so raising the scale to widen
+        # the safety margin would also silently stop the largest obstacles from
+        # being detected at all.
+        mask = obs_rad <= MAX_OBS_RADIUS
+        obs_rad = obs_rad[mask] * RADIUS_SCALE
         obs_pos = obs_pos[mask]
 
         # Add heading (set to 0) and maximum velocity to the obstacle positions
@@ -744,12 +842,60 @@ class LoopHandler(Node):
         # 1. Stop the robot at the beginning of the thinking phase
         self.pub.publish(Twist())
 
-        # 2. Wait until at least one synchronised pair is available
+        # 2. Wait until both topics have produced something
         if self.latest_odom is None or self.latest_scan is None:
-            self.get_logger().debug("control_loop: no pair yet, skipping")
+            self.get_logger().debug("control_loop: no sensor data yet, skipping")
             return
 
-        # 3. Use the LATEST synchronised pair (this makes sensor data deterministic)
+        # 2b. Refuse to plan on stale data.
+        #
+        # Everything below treats the stored pose and scan as the current state of
+        # the world, and the velocity obstacles are sized for exactly one control
+        # cycle of obstacle motion. Sensor data older than that breaks the
+        # assumption the safety argument rests on, so the only sound response is
+        # not to move: the stop command was already published above, and the tick
+        # is abandoned.
+        #
+        # This restores a gate the loop used to have and lost when the message
+        # filter was introduced - the --env-render help still describes it - except
+        # that freshness is now judged from each message's own stamp rather than by
+        # comparing consecutive values. A value comparison cannot tell "the reading
+        # did not change" from "no reading arrived", and those differ precisely
+        # when VO has commanded a stop, i.e. when the robot is stationary and its
+        # pose legitimately repeats.
+        now_ns = self.get_clock().now().nanoseconds
+        age_odom = self._stamp_age(now_ns, self.latest_odom)
+        age_scan = self._stamp_age(now_ns, self.latest_scan)
+        pair_seq = self.pair_seq
+        stale = max(age_odom, age_scan) > MAX_SENSOR_AGE
+        self.prev_pair_seq = pair_seq
+        diag = {
+            'pair_seq': pair_seq,
+            'stale': stale,
+            'raw_odom': self.raw_odom,
+            'raw_scan': self.raw_scan,
+            'age_odom': age_odom,
+            'age_scan': age_scan,
+        }
+        if DIAG:
+            self.logger.info(
+                f"diag step={self.i} pair_seq={pair_seq} stale={stale} "
+                f"raw_odom={self.raw_odom} raw_scan={self.raw_scan} "
+                f"age_odom={age_odom:.3f} age_scan={age_scan:.3f}"
+            )
+        if stale:
+            self.stale_skips += 1
+            # Loud, because a robot that stops for seconds on end is a symptom
+            # worth seeing rather than a state to sit in quietly.
+            self.logger.warn(
+                f"stale sensor data at step {self.i}: odom {age_odom:.3f} s, "
+                f"scan {age_scan:.3f} s, limit {MAX_SENSOR_AGE:.3f} s - "
+                f"holding position (skip {self.stale_skips})"
+            )
+            return
+
+        # 3. Use the latest message from each topic as the current world state
+
         self.odom_msg = self.latest_odom
         self.lidar_msg = self.latest_scan
 
@@ -818,9 +964,6 @@ class LoopHandler(Node):
         # Calculate the time taken for obstacle estimation
         t1 = time.time() - start_time
 
-        # Set a fixed random seed for reproducibility
-        seed_everything(exp_num)
-
         # Start timing for planning
         initial_time = time.time()
 
@@ -883,6 +1026,7 @@ class LoopHandler(Node):
             "n_obs": len(self.obs_rad),
             "t_cycle": np.nan if self.prev_move_time is None
                        else now - self.prev_move_time,
+            **diag,
         })
         self.prev_move_time = now
 
@@ -995,6 +1139,37 @@ def save_data(loopHandler, exp_num):
     t_plan_med, t_plan_p99 = _phase("t_plan")
     t_cycle_med, t_cycle_p99 = _phase("t_cycle")
 
+    # Sensor freshness, summarised so the answer is readable straight off the CSV.
+    # staleFrac is the share of cycles that replanned on the previous cycle's data;
+    # staleRun is the worst uninterrupted stretch of them. pairsPerCycle against
+    # rawScanPerCycle is the discriminator: both near zero means the simulator
+    # stopped publishing, the first near zero while the second does not means the
+    # synchroniser stopped matching.
+    ss = loopHandler.step_stats
+    n_cycles = len(ss)
+    if n_cycles:
+        # A stale tick now returns before step_stats is appended, so the flag is
+        # False on every recorded cycle by construction. What counts is how many
+        # ticks were refused: staleFrac is skips as a share of all ticks, refused
+        # plus completed.
+        n_skips = loopHandler.stale_skips
+        stale_frac = n_skips / (n_skips + n_cycles)
+        worst = n_skips
+        pairs_per_cycle = ss[-1].get("pair_seq", np.nan) / n_cycles
+        # The raw counters only advance when --diag installed the extra
+        # subscriptions. Report NaN rather than 0 otherwise, so an ordinary run
+        # cannot be misread as "the simulator published nothing".
+        if DIAG:
+            raw_scan_per_cycle = ss[-1].get("raw_scan", np.nan) / n_cycles
+            raw_odom_per_cycle = ss[-1].get("raw_odom", np.nan) / n_cycles
+        else:
+            raw_scan_per_cycle = raw_odom_per_cycle = np.nan
+        age_scan_med, age_scan_p99 = _phase("age_scan")
+    else:
+        stale_frac = worst = pairs_per_cycle = np.nan
+        raw_scan_per_cycle = raw_odom_per_cycle = np.nan
+        age_scan_med = age_scan_p99 = np.nan
+
     # Calculate normalized distances to the goal
     max_eudist = loopHandler.sim_env.gym_env.max_eudist
     goal = loopHandler.s0.goal
@@ -1046,12 +1221,22 @@ def save_data(loopHandler, exp_num):
         "tPlanP99": t_plan_p99,
         "tCycleMed": t_cycle_med,
         "tCycleP99": t_cycle_p99,
+        "staleFrac": stale_frac,
+        "staleSkips": worst,
+        "maxSensorAge": MAX_SENSOR_AGE,
+        "pairsPerCycle": pairs_per_cycle,
+        "rawScanPerCycle": raw_scan_per_cycle,
+        "rawOdomPerCycle": raw_odom_per_cycle,
+        "ageScanMed": age_scan_med,
+        "ageScanP99": age_scan_p99,
         # Configuration, so a sweep's CSVs are self-describing.
         "ts": dt,
         "planBudget": PLAN_BUDGET if PLAN_BUDGET is not None else np.nan,
         "thinkMargin": THINK_MARGIN,
         "horizonS": HORIZON_S,
         "radiusScale": RADIUS_SCALE,
+        "maxObsRadius": MAX_OBS_RADIUS,
+        "voGeometry": cli_args.vo_geometry,
         "maxObsVel": cli_args.max_obs_vel,
         "explorationC": EXPLORATION_C,
         "gammaPerSecond": GAMMA_S,
@@ -1086,6 +1271,9 @@ def main(args=None):
     """
 
     rclpy.init(args=args)
+
+    # Set a fixed random seed for reproducibility
+    seed_everything(exp_num)
 
     gc.disable()
     print(f"Experiment: {exp_num} | Algorithm: {algorithm} | Trajectories: {trajectories}")

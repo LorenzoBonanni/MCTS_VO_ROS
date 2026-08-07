@@ -38,7 +38,7 @@ RenderSettings:
   m_ReflectionIntensity: 1
   m_CustomReflection: {fileID: 0}
   m_Sun: {fileID: 705507994}
-  m_IndirectSpecularColor: {r: 0.44658786, g: 0.49642265, b: 0.57482505, a: 1}
+  m_IndirectSpecularColor: {r: 0.4465878, g: 0.4964224, b: 0.57482475, a: 1}
   m_UseRadianceAmbientProbe: 0
 --- !u!157 &3
 LightmapSettings:
@@ -1307,7 +1307,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8753101125198676617, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: ScanningFrequency
-      value: 10
+      value: 50
       objectReference: {fileID: 0}
     - target: {fileID: 8753101125338730101, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
       propertyPath: BaseRigidbody
@@ -1328,39 +1328,6 @@ GameObject:
   m_CorrespondingSourceObject: {fileID: 8753101125338730107, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
   m_PrefabInstance: {fileID: 1248027304}
   m_PrefabAsset: {fileID: 0}
---- !u!114 &1248027307
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1248027306}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 562f08d25dd7e67ce9e538e75a2dbe14, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
-  NodeName: camera_node
-  CamTopic: pi_camera/compressed
-  CamInfoTopic: pi_camera/camera_info
-  ImageTopic: pi_camera/image
-  ImageCamera: {fileID: 0}
-  FrameId: /base_footprint
-  resolutionWidth: 640
-  resolutionHeight: 480
-  qualityLevel: 50
---- !u!114 &1248027313
-MonoBehaviour:
-  m_ObjectHideFlags: 0
-  m_CorrespondingSourceObject: {fileID: 0}
-  m_PrefabInstance: {fileID: 0}
-  m_PrefabAsset: {fileID: 0}
-  m_GameObject: {fileID: 1248027306}
-  m_Enabled: 0
-  m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 57f5dd68061b333fba28d91771636fbf, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
 --- !u!1 &1275237202
 GameObject:
   m_ObjectHideFlags: 0
