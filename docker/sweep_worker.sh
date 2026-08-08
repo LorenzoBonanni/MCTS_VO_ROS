@@ -31,9 +31,9 @@ task_id=$(( SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID ))
 : "${C_VALS:?export C_VALS}"
 : "${TRAJECTORIES:?export TRAJECTORIES}"
 : "${VO_GEOMETRIES:?export VO_GEOMETRIES}"
+: "${MAX_OBS_VEL_VALS:?export MAX_OBS_VEL_VALS}"
 : "${ALGORITHM:?export ALGORITHM}"
 : "${NUM_EXP:?export NUM_EXP}"
-: "${MAX_OBS_VEL:?export MAX_OBS_VEL}"
 : "${MAX_OBS_RADIUS:?export MAX_OBS_RADIUS}"
 REPO="$MCTSVO_REPO"
 
@@ -51,14 +51,16 @@ IFS=' ' read -ra rs_values    <<< "$RS_VALS"
 IFS=' ' read -ra gamma_values <<< "$GAMMA_VALS"
 IFS=' ' read -ra c_values     <<< "$C_VALS"
 IFS=' ' read -ra scenes       <<< "$TRAJECTORIES"
+IFS=' ' read -ra mov_values   <<< "$MAX_OBS_VEL_VALS"
 IFS=' ' read -ra vo_values    <<< "$VO_GEOMETRIES"
 
 num_rs=${#rs_values[@]}
 num_gamma=${#gamma_values[@]}
 num_c=${#c_values[@]}
 num_scenes=${#scenes[@]}
+num_mov=${#mov_values[@]}
 num_vo=${#vo_values[@]}
-total_cells=$(( num_rs * num_gamma * num_c * num_scenes * num_vo ))
+total_cells=$(( num_rs * num_gamma * num_c * num_scenes * num_mov * num_vo ))
 
 if (( task_id >= total_cells )); then
     echo "task_id $task_id beyond the grid (0..$(( total_cells - 1 ))), nothing to do"
@@ -74,13 +76,15 @@ fi
 if (( SLURM_ARRAY_TASK_ID == 0 && SLURM_PROCID == 0 )); then
     mkdir -p "$SWEEP_DIR"
     {
-        printf 'name\trs\tgamma\tc\tvo\n'
+        printf 'name\trs\tgamma\tc\tmov\tvo\n'
         for rs in "${rs_values[@]}"; do
           for g in "${gamma_values[@]}"; do
             for c in "${c_values[@]}"; do
-              for v in "${vo_values[@]}"; do
-                printf 'rs%s_g%s_c%s_vo%s\t%s\t%s\t%s\t%s\n' \
-                    "$rs" "$g" "$c" "$v" "$rs" "$g" "$c" "$v"
+              for m in "${mov_values[@]}"; do
+                for v in "${vo_values[@]}"; do
+                  printf 'rs%s_g%s_c%s_mov%s_vo%s\t%s\t%s\t%s\t%s\t%s\n' \
+                      "$rs" "$g" "$c" "$m" "$v" "$rs" "$g" "$c" "$m" "$v"
+                done
               done
             done
           done
@@ -92,18 +96,21 @@ fi
 # task ids and therefore in the same array job.
 vo_idx=$((    task_id % num_vo ))
 scene_idx=$(( (task_id / num_vo) % num_scenes ))
-c_idx=$((     (task_id / (num_vo * num_scenes)) % num_c ))
-gamma_idx=$(( (task_id / (num_vo * num_scenes * num_c)) % num_gamma ))
-rs_idx=$((     task_id / (num_vo * num_scenes * num_c * num_gamma) ))
+mov_idx=$((   (task_id / (num_vo * num_scenes)) % num_mov ))
+c_idx=$((     (task_id / (num_vo * num_scenes * num_mov)) % num_c ))
+gamma_idx=$(( (task_id / (num_vo * num_scenes * num_mov * num_c)) % num_gamma ))
+rs_idx=$((     task_id / (num_vo * num_scenes * num_mov * num_c * num_gamma) ))
 
 RS="${rs_values[$rs_idx]}"
 GAMMA="${gamma_values[$gamma_idx]}"
 C="${c_values[$c_idx]}"
 SCENE="${scenes[$scene_idx]}"
+MOV="${mov_values[$mov_idx]}"
 VO="${vo_values[$vo_idx]}"
-# The geometry must be in the cell name: without it both arms would share a
-# directory and the "already done" check below would skip the second one.
-NAME="rs${RS}_g${GAMMA}_c${C}_vo${VO}"
+# Every swept axis must be in the cell name. Two cells differing only in an
+# axis missing from the name would share a directory, and the "already done"
+# check below would then skip the second one entirely.
+NAME="rs${RS}_g${GAMMA}_c${C}_mov${MOV}_vo${VO}"
 
 # --------------------------------------------------
 # 1.5 ROS
@@ -159,7 +166,7 @@ GAMMA=$GAMMA
 EXPLORATION_C=$C
 VO_GEOMETRY=$VO
 MAX_OBS_RADIUS=$MAX_OBS_RADIUS
-MAX_OBS_VEL=$MAX_OBS_VEL
+MAX_OBS_VEL=$MOV
 EOF
 
 cd "$WORK"
@@ -201,7 +208,7 @@ for (( exp_num = 0; exp_num < NUM_EXP; exp_num++ )); do
             --exploration-c "$C" \
             --vo-geometry "$VO" \
             --max-obs-radius "$MAX_OBS_RADIUS" \
-            --max-obs-vel "$MAX_OBS_VEL" \
+            --max-obs-vel "$MOV" \
             >> "$log" 2>&1
         rc=$?
         set -e

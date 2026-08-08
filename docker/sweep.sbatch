@@ -9,14 +9,14 @@
 #SBATCH --partition=normal
 #SBATCH --job-name=mctsvo-sweep
 #SBATCH --time=06:00:00
-# 4 rs * 4 gamma * 4 c * 2 scenes * 2 VO geometries = 256 cells.
+# 3 rs * 4 gamma * 4 c * 2 scenes * 2 max_obs_vel * 2 VO geometries = 384 cells.
 # sweep_worker.sh computes task_id = SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID, so
-# with --ntasks-per-node=8 the array index runs 0..(256/8 - 1) and the task ids
-# tile 0..255 exactly. Do NOT add a step (--array=0-255:16): the multiply by 8
+# with --ntasks-per-node=8 the array index runs 0..(384/8 - 1) and the task ids
+# tile 0..383 exactly. Do NOT add a step (--array=0-383:16): the multiply by 8
 # means a stepped index lands beyond the grid and the worker exits with
 # "nothing to do", running a handful of cells instead of all of them. To limit
 # how many run at once use %N, which throttles without skipping.
-#SBATCH --array=0-31
+#SBATCH --array=0-47
 #SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/sweep_%A_%a.out
 
 export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
@@ -25,7 +25,7 @@ export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
 # sweep so far has actually run: sweep_worker.sh used to hard-code them and
 # ignore this export, which read "sinusoidal intention" - the easy scenes.
 export TRAJECTORIES="sinusoidal_complex intention_complex"
-export RS_VALS="1.4 1.8 2.2 2.6"
+export RS_VALS="1.2 1.4 1.6"
 export GAMMA_VALS="0.65 0.81 0.90 0.95"
 export C_VALS="0.5 1.0 2.0 5.0"
 # The A/B: "paper" is Algorithm 4 as written (tangents to r1, ignore beyond
@@ -35,13 +35,12 @@ export C_VALS="0.5 1.0 2.0 5.0"
 # Set to just "paper" to halve the grid once the comparison is settled.
 export VO_GEOMETRIES="paper legacy"
 export NUM_EXP=50                 # independent seeds per combination
-# Must be >= the fastest obstacle in the scene or the VO safety guarantee does
-# not hold. The .unity files override the script defaults: max_speed/maxSpeed
-# are 0.2 on the fastest instances in both complex scenes (the 0.15f in the
-# move_*.cs sources is a default, not the live value). 0.25 clears that with
-# margin. A previous sweep ran at 0.1 - half the true maximum - which undersized
-# every collision cone by v*(dt+think_margin) = 0.02 m.
-export MAX_OBS_VEL=0.25
+# Swept axis. Must be >= the fastest obstacle in the scene or the VO safety
+# guarantee does not hold. The .unity files override the move_*.cs defaults:
+# max_speed/maxSpeed are 0.2 on the fastest instances in both complex scenes,
+# so 0.2 is the tight bound and 0.25 adds margin. An earlier sweep ran at 0.1 -
+# half the true maximum - which undersized every collision cone.
+export MAX_OBS_VEL_VALS="0.2 0.25"
 # Largest RANSAC-fitted obstacle radius kept, applied to the measured radius
 # before --radius-scale inflates it. Filtering after the scaling, as the code
 # used to, made the effective cutoff MAX_OBS_RADIUS/rs, which coupled this to
