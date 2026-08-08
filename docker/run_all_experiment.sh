@@ -9,10 +9,16 @@
 #SBATCH --partition=normal
 #SBATCH --job-name=mctsvo-campaign
 #SBATCH --time=08:00:00
-# 3 algos * 4 scenes * 30 seeds = 360 tasks. run_all_worker.sh computes
+# 3 algos * 4 scenes * 50 seeds = 600 tasks. run_all_worker.sh computes
 # task_id = SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID, so with --ntasks-per-node=8
-# the array index runs 0..(360/8 - 1) = 0..44 and the task ids tile 0..359.
-#SBATCH --array=0-44
+# the array index runs 0..(600/8 - 1) = 0..74 and the task ids tile 0..599.
+#
+# RESIZE THIS whenever ALGORITHMS, TRAJECTORIES or NUM_SEEDS changes: an array
+# that is too short does not fail, it runs the first 8*(last+1) tasks and stops,
+# leaving a campaign that looks finished and is missing whole cells. It was left
+# at 0-44 when NUM_SEEDS went 30 -> 50, which would have silently dropped 240
+# runs. Too long is harmless - the worker exits "nothing to do".
+#SBATCH --array=0-74
 #SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/campaign_%A_%a.out
 
 # MCTS was listed twice here. Since the output file is data_<ALGO>_<seed>.csv,
