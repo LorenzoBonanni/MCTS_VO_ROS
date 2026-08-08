@@ -9,14 +9,14 @@
 #SBATCH --partition=normal
 #SBATCH --job-name=mctsvo-sweep
 #SBATCH --time=06:00:00
-# 3 rs * 4 gamma * 4 c * 2 scenes * 2 max_obs_vel * 2 VO geometries = 384 cells.
+# 3 rs * 4 gamma * 4 c * 2 scenes * 2 max_obs_vel = 192 cells.
 # sweep_worker.sh computes task_id = SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID, so
-# with --ntasks-per-node=8 the array index runs 0..(384/8 - 1) and the task ids
-# tile 0..383 exactly. Do NOT add a step (--array=0-383:16): the multiply by 8
+# with --ntasks-per-node=8 the array index runs 0..(192/8 - 1) and the task ids
+# tile 0..191 exactly. Do NOT add a step (--array=0-191:16): the multiply by 8
 # means a stepped index lands beyond the grid and the worker exits with
 # "nothing to do", running a handful of cells instead of all of them. To limit
 # how many run at once use %N, which throttles without skipping.
-#SBATCH --array=0-47
+#SBATCH --array=0-23
 #SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/sweep_%A_%a.out
 
 export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
@@ -28,12 +28,12 @@ export TRAJECTORIES="sinusoidal_complex intention_complex"
 export RS_VALS="1.2 1.4 1.6"
 export GAMMA_VALS="0.65 0.81 0.90 0.95"
 export C_VALS="0.5 1.0 2.0 5.0"
-# The A/B: "paper" is Algorithm 4 as written (tangents to r1, ignore beyond
-# r0 + r1, trapped below r1); "legacy" is the geometry the 180-run campaign
-# used (tangents to r0 + r1, ignore beyond 1.6*(r0 + r1)). Both geometries see
-# the same scenes and the same seeds, so the difference is attributable.
-# Set to just "paper" to halve the grid once the comparison is settled.
-export VO_GEOMETRIES="paper legacy"
+# "paper" is Algorithm 4 as written: tangents to r1, ignore beyond r0 + r1,
+# trapped below r1. The comparison against "legacy" (tangents to r0 + r1,
+# ignore beyond 1.6*(r0 + r1)) is settled and legacy is dropped: over 4 cells
+# x 50 seeds, paper gave 0% voluntary collisions in every cell against legacy's
+# 2-4%, with goal rate unchanged. Add "legacy" back to re-run that comparison.
+export VO_GEOMETRIES="paper"
 export NUM_EXP=50                 # independent seeds per combination
 # Swept axis. Must be >= the fastest obstacle in the scene or the VO safety
 # guarantee does not hold. The .unity files override the move_*.cs defaults:
