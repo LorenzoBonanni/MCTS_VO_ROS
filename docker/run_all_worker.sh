@@ -88,7 +88,14 @@ set -e
 # Unique isolation per task
 export ROS_DOMAIN_ID=$(( task_id % 101 ))
 export ROS_LOCALHOST_ONLY=1
-export NUMBA_CACHE_DIR="/tmp/numba-${task_id}"
+# Shared across every task on this node, deliberately. Here one task is a
+# single run, so a per-task cache meant every run recompiled the jitted kernels
+# from scratch - about 15 s each, and 360 times over the campaign. /tmp is
+# node-local, so this is warm for every array task that lands on a node after
+# the first. Numba writes cache entries via atomic rename, so concurrent use is
+# safe; the stagger below keeps the eight procs of the first task from all
+# compiling the same kernels at once.
+export NUMBA_CACHE_DIR="/tmp/numba-shared"
 export MPLCONFIGDIR="/tmp/mpl-${task_id}"
 export HOME="/tmp/home-${task_id}"
 export ROS_HOME="$HOME/.ros"
@@ -125,6 +132,12 @@ done
 ln -sfn "$DEBUG_ROOT" "$WORK/debug"
 
 cd "$WORK"
+
+# Stagger the eight procs sharing this node so they do not all JIT-compile into
+# the empty shared cache simultaneously. Whoever gets there first populates it;
+# the rest find it warm. Costs at most 14 s once per node, and only when the
+# cache is cold.
+sleep $(( SLURM_PROCID * 2 ))
 
 echo "task $task_id: ${ALGO} ${SCENE} seed ${seed} (rs=${RS} gamma=${GAMMA} c=${C} mov=${MOV})"
 
