@@ -26,6 +26,17 @@ task_id=$(( SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID ))
 # what is actually wrong.
 : "${SWEEP_DIR:?export SWEEP_DIR}"
 : "${MCTSVO_REPO:?export MCTSVO_REPO}"
+
+# Refuse to run against a path the container cannot persist. Only /root/sweep
+# and /scratch are bind mounts (see ~/.edf/mctsvo.toml); anything else lands in
+# the container's writable layer and is discarded when the job exits, which
+# looks exactly like success - every run reports "ok" and the results vanish.
+case "$SWEEP_DIR" in
+    /root/sweep|/root/sweep/*|/scratch/*) ;;
+    *) echo "SWEEP_DIR=$SWEEP_DIR is not on a bind mount; results would be" >&2
+       echo "discarded when the job exits. Use /root/sweep." >&2
+       exit 1 ;;
+esac
 : "${RS_VALS:?export RS_VALS}"
 : "${GAMMA_VALS:?export GAMMA_VALS}"
 : "${C_VALS:?export C_VALS}"

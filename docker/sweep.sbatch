@@ -48,7 +48,15 @@ export MAX_OBS_VEL_VALS="0.2 0.25"
 export MAX_OBS_RADIUS=0.5
 export ROLLOUT_COLLISION="check"
 
-export SWEEP_DIR="${SWEEP_DIR:-/root/sweep}"
+# Hardcoded, NOT "${SWEEP_DIR:-...}". This path is a bind mount defined in
+# ~/.edf/mctsvo.toml ("${OUTPUT_SCRATCH}/sweep:/root/sweep") and is the only
+# writable path inside the container that survives the job. Honouring an
+# inherited SWEEP_DIR once cost a full 192-cell sweep: a host path was exported
+# in the submitting shell, sbatch passed it through, and because that path is
+# not mounted the container silently created it in its own writable layer and
+# threw away all 9600 runs on exit. Archive the contents between sweeps rather
+# than pointing this elsewhere.
+export SWEEP_DIR=/root/sweep
 export MCTSVO_REPO="${MCTSVO_REPO:-/workspace/MCTS_VO_ROS}"
 
 srun --environment=mctsvo "$MCTSVO_REPO/docker/sweep_worker.sh"
