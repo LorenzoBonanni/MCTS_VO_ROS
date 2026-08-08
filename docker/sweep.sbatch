@@ -9,14 +9,22 @@
 #SBATCH --partition=normal
 #SBATCH --job-name=mctsvo-sweep
 #SBATCH --time=06:00:00
-# 3 rs * 4 gamma * 4 c * 2 scenes * 2 max_obs_vel = 192 cells.
+# PERCEPTION PROBE: does MAX_OBS_RADIUS cause the detection dropouts?
+# 2 rs * 1 gamma * 4 c * 2 scenes * 1 max_obs_vel = 16 cells.
+# Baseline for these same 16 cells at MAX_OBS_RADIUS=0.5 is 2.17% voluntary
+# collisions; 206 of 208 were preceded by a single-cycle dropout (46% of runs
+# with a dropout collide, against 0.02% without).
+# Full grid, to restore:
+#   RS_VALS="1.2 1.4 1.6"  GAMMA_VALS="0.65 0.81 0.90 0.95"
+#   C_VALS="0.5 1.0 2.0 5.0"  MAX_OBS_VEL_VALS="0.2 0.25"
+#   MAX_OBS_RADIUS=0.5  NUM_EXP=50  --array=0-23   (192 cells)
 # sweep_worker.sh computes task_id = SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID, so
 # with --ntasks-per-node=8 the array index runs 0..(192/8 - 1) and the task ids
 # tile 0..191 exactly. Do NOT add a step (--array=0-191:16): the multiply by 8
 # means a stepped index lands beyond the grid and the worker exits with
 # "nothing to do", running a handful of cells instead of all of them. To limit
 # how many run at once use %N, which throttles without skipping.
-#SBATCH --array=0-23
+#SBATCH --array=0-1
 #SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/sweep_%A_%a.out
 
 export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
@@ -25,8 +33,8 @@ export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
 # sweep so far has actually run: sweep_worker.sh used to hard-code them and
 # ignore this export, which read "sinusoidal intention" - the easy scenes.
 export TRAJECTORIES="sinusoidal_complex intention_complex"
-export RS_VALS="1.2 1.4 1.6"
-export GAMMA_VALS="0.65 0.81 0.90 0.95"
+export RS_VALS="1.2 1.4"
+export GAMMA_VALS="0.65"
 export C_VALS="0.5 1.0 2.0 5.0"
 # "paper" is Algorithm 4 as written: tangents to r1, ignore beyond r0 + r1,
 # trapped below r1. The comparison against "legacy" (tangents to r0 + r1,
@@ -34,18 +42,18 @@ export C_VALS="0.5 1.0 2.0 5.0"
 # x 50 seeds, paper gave 0% voluntary collisions in every cell against legacy's
 # 2-4%, with goal rate unchanged. Add "legacy" back to re-run that comparison.
 export VO_GEOMETRIES="paper"
-export NUM_EXP=50                 # independent seeds per combination
+export NUM_EXP=25                 # independent seeds per combination
 # Swept axis. Must be >= the fastest obstacle in the scene or the VO safety
 # guarantee does not hold. The .unity files override the move_*.cs defaults:
 # max_speed/maxSpeed are 0.2 on the fastest instances in both complex scenes,
 # so 0.2 is the tight bound and 0.25 adds margin. An earlier sweep ran at 0.1 -
 # half the true maximum - which undersized every collision cone.
-export MAX_OBS_VEL_VALS="0.2 0.25"
+export MAX_OBS_VEL_VALS="0.2"
 # Largest RANSAC-fitted obstacle radius kept, applied to the measured radius
 # before --radius-scale inflates it. Filtering after the scaling, as the code
 # used to, made the effective cutoff MAX_OBS_RADIUS/rs, which coupled this to
 # the rs axis and made that axis uninterpretable.
-export MAX_OBS_RADIUS=0.5
+export MAX_OBS_RADIUS=5.0   # effectively disabled, this is the probe
 export ROLLOUT_COLLISION="check"
 
 # Hardcoded, NOT "${SWEEP_DIR:-...}". This path is a bind mount defined in
