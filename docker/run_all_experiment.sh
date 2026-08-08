@@ -20,7 +20,10 @@
 # already present and skipped - but it inflated the task count by 30 per scene.
 export ALGORITHMS="${ALGORITHMS:-MCTS VO-TREE VO-PLANNER}"
 export TRAJECTORIES="${TRAJECTORIES:-sinusoidal_complex intention_complex sinusoidal intention}"
-export NUM_SEEDS=50                 # number of seeds per (algo, scene)
+export NUM_SEEDS="${NUM_SEEDS:-50}"  # seeds per (algo, scene)
+# ALGORITHMS/TRAJECTORIES/NUM_SEEDS honour the submitting environment, so a
+# single cell can be re-run without editing this file. Size --array to match:
+# ceil(N_ALGO * N_TRAJ * NUM_SEEDS / 8) - 1.
 
 # RADIUS_SCALE / GAMMA_PER_SECOND / EXPLORATION_C / MAX_OBS_VEL are deliberately
 # NOT exported. run_all_worker.sh selects them per scene from the 9600-run
