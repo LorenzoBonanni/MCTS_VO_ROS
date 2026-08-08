@@ -18,9 +18,9 @@
 # MCTS was listed twice here. Since the output file is data_<ALGO>_<seed>.csv,
 # the duplicate could never produce anything - the second pass found the CSV
 # already present and skipped - but it inflated the task count by 30 per scene.
-export ALGORITHMS="MCTS VO-TREE VO-PLANNER"
-export TRAJECTORIES="sinusoidal_complex intention_complex sinusoidal intention"
-export NUM_SEEDS=30                 # number of seeds per (algo, scene)
+export ALGORITHMS="${ALGORITHMS:-MCTS VO-TREE VO-PLANNER}"
+export TRAJECTORIES="${TRAJECTORIES:-sinusoidal_complex intention_complex sinusoidal intention}"
+export NUM_SEEDS=50                 # number of seeds per (algo, scene)
 
 # RADIUS_SCALE / GAMMA_PER_SECOND / EXPLORATION_C / MAX_OBS_VEL are deliberately
 # NOT exported. run_all_worker.sh selects them per scene from the 9600-run
