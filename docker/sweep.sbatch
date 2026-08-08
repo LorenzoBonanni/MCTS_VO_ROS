@@ -9,11 +9,26 @@
 #SBATCH --partition=normal
 #SBATCH --job-name=mctsvo-sweep
 #SBATCH --time=06:00:00
-# PERCEPTION PROBE: does MAX_OBS_RADIUS cause the detection dropouts?
-# 2 rs * 1 gamma * 4 c * 2 scenes * 1 max_obs_vel = 16 cells.
-# Baseline for these same 16 cells at MAX_OBS_RADIUS=0.5 is 2.17% voluntary
-# collisions; 206 of 208 were preceded by a single-cycle dropout (46% of runs
-# with a dropout collide, against 0.02% without).
+# GAMMA EXTENSION: is the discount horizon too long for the frozen-obstacle
+# model? 2 rs * 4 gamma * 2 c * 2 scenes * 1 mov * 1 vo = 32 cells.
+#
+# The search holds obstacles at their observed position (paper 4.2.1), so the
+# model is only usable while obstacles have not moved far. gamma sets how far
+# ahead the planner relies on it: the effective horizon is dt/(1 - gamma^dt),
+# i.e. 2.4 s at 0.65, 4.8 s at 0.81, 9.5 s at 0.90, 19.5 s at 0.95 - and the
+# 9600-run sweep found goal rate falling monotonically along exactly that axis,
+# 21.2% -> 0.1%. Robot r=0.15 and obstacle r=0.10 collide at 0.25 m, so an
+# approaching obstacle consumes the whole margin in 0.25/v_obs seconds: 2.5 s at
+# the easy scenes' 0.1 m/s, but only 1.25 s at the complex scenes' 0.2 m/s.
+# Solving dt/(1 - gamma^dt) = 1.25 gives gamma ~ 0.43, which the old grid could
+# never reach - its floor was 0.65. Hence 0.30/0.43/0.55 with 0.65 as control.
+#
+# Prediction: a peak near 0.43 on the complex scenes. If instead goal rate keeps
+# rising all the way to 0.30, the horizon account is wrong and the tree is
+# simply better off not looking ahead at all.
+#
+# rs and c both take the two per-scene tuned values, since the sweep applies one
+# setting to both scenes and they disagree (sin: rs=1.4 c=5.0, int: rs=1.6 c=2.0).
 # Full grid, to restore:
 #   RS_VALS="1.2 1.4 1.6"  GAMMA_VALS="0.65 0.81 0.90 0.95"
 #   C_VALS="0.5 1.0 2.0 5.0"  MAX_OBS_VEL_VALS="0.2 0.25"
@@ -24,7 +39,7 @@
 # means a stepped index lands beyond the grid and the worker exits with
 # "nothing to do", running a handful of cells instead of all of them. To limit
 # how many run at once use %N, which throttles without skipping.
-#SBATCH --array=0-1
+#SBATCH --array=0-3
 #SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/sweep_%A_%a.out
 
 export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
@@ -33,9 +48,9 @@ export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
 # sweep so far has actually run: sweep_worker.sh used to hard-code them and
 # ignore this export, which read "sinusoidal intention" - the easy scenes.
 export TRAJECTORIES="sinusoidal_complex intention_complex"
-export RS_VALS="1.2 1.4"
-export GAMMA_VALS="0.65"
-export C_VALS="0.5 1.0 2.0 5.0"
+export RS_VALS="1.4 1.6"
+export GAMMA_VALS="0.30 0.43 0.55 0.65"
+export C_VALS="2.0 5.0"
 # "paper" is Algorithm 4 as written: tangents to r1, ignore beyond r0 + r1,
 # trapped below r1. The comparison against "legacy" (tangents to r0 + r1,
 # ignore beyond 1.6*(r0 + r1)) is settled and legacy is dropped: over 4 cells
@@ -48,12 +63,16 @@ export NUM_EXP=25                 # independent seeds per combination
 # max_speed/maxSpeed are 0.2 on the fastest instances in both complex scenes,
 # so 0.2 is the tight bound and 0.25 adds margin. An earlier sweep ran at 0.1 -
 # half the true maximum - which undersized every collision cone.
-export MAX_OBS_VEL_VALS="0.2"
+export MAX_OBS_VEL_VALS="0.25"
 # Largest RANSAC-fitted obstacle radius kept, applied to the measured radius
 # before --radius-scale inflates it. Filtering after the scaling, as the code
 # used to, made the effective cutoff MAX_OBS_RADIUS/rs, which coupled this to
 # the rs axis and made that axis uninterpretable.
-export MAX_OBS_RADIUS=5.0   # effectively disabled, this is the probe
+# Back to 0.5 after the perception probe left this at 5.0 (effectively
+# disabled). The probe is settled - it refuted MAX_OBS_RADIUS as the cause of
+# the detection dropouts, 2.25% voluntary collisions against a 2.17% baseline -
+# and 0.5 is the value the campaign and every tuning result use.
+export MAX_OBS_RADIUS=0.5
 export ROLLOUT_COLLISION="check"
 
 # Hardcoded, NOT "${SWEEP_DIR:-...}". This path is a bind mount defined in

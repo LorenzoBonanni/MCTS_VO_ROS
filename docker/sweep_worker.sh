@@ -118,10 +118,13 @@ C="${c_values[$c_idx]}"
 SCENE="${scenes[$scene_idx]}"
 MOV="${mov_values[$mov_idx]}"
 VO="${vo_values[$vo_idx]}"
-# Every swept axis must be in the cell name. Two cells differing only in an
-# axis missing from the name would share a directory, and the "already done"
-# check below would then skip the second one entirely.
-NAME="rs${RS}_g${GAMMA}_c${C}_mov${MOV}_vo${VO}"
+# Every parameter that varies BETWEEN SWEEPS must be in the cell name, not just
+# the ones swept within a single run. Two cells differing only in a field the
+# name omits share a directory, and the "already done" check below then skips
+# the second, silently merging two configurations into one result. That is what
+# happened between the full sweep (MAX_OBS_RADIUS=0.5) and the perception probe
+# (5.0): same rs/gamma/c/mov, same directory, different meaning.
+NAME="rs${RS}_g${GAMMA}_c${C}_mov${MOV}_mor${MAX_OBS_RADIUS}_vo${VO}"
 
 # --------------------------------------------------
 # 1.5 ROS
