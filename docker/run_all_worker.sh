@@ -88,14 +88,18 @@ set -e
 # Unique isolation per task
 export ROS_DOMAIN_ID=$(( task_id % 101 ))
 export ROS_LOCALHOST_ONLY=1
-# Shared across every task on this node, deliberately. Here one task is a
-# single run, so a per-task cache meant every run recompiled the jitted kernels
-# from scratch - about 15 s each, and 360 times over the campaign. /tmp is
-# node-local, so this is warm for every array task that lands on a node after
-# the first. Numba writes cache entries via atomic rename, so concurrent use is
-# safe; the stagger below keeps the eight procs of the first task from all
-# compiling the same kernels at once.
-export NUMBA_CACHE_DIR="/tmp/numba-shared"
+# Shared, deliberately. Here one task is a single run, so a per-task cache meant
+# every one of the 360 runs recompiled the jitted kernels from scratch - about
+# 15 s each. Every @jit in this project carries an explicit signature, so the
+# kernels compile eagerly at import and the cache can be populated once, ahead
+# of the campaign, by importing the modules (see docker/README.md).
+#
+# Default is /scratch, which is a bind mount and therefore shared by every node,
+# so a single warm-up covers the whole campaign. Numba writes cache entries with
+# atomic renames and keys them on the source path, which is identical across
+# nodes, so concurrent use is safe. Set NUMBA_CACHE_DIR to /tmp/numba-shared to
+# fall back to a node-local cache if the shared filesystem is ever a problem.
+export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/scratch/numba-cache}"
 export MPLCONFIGDIR="/tmp/mpl-${task_id}"
 export HOME="/tmp/home-${task_id}"
 export ROS_HOME="$HOME/.ros"

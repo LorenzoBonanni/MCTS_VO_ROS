@@ -229,3 +229,30 @@ UID is baked in at build time, so rebuild with `docker/run.sh --build`.
 **A run leaves a Unity process behind** — `run.sh` starts the container with
 `--init`, so killing it takes the simulator with it. If one does survive:
 `pkill -f 'env_build/.*env.x86_64'`.
+
+## Pre-compiling the numba cache
+
+Every `@jit` in this project carries an explicit signature, so the kernels are
+compiled **eagerly at import** rather than on first call. The cache can
+therefore be filled by importing the modules — no experiment needs to run:
+
+```bash
+srun -A <account> --partition=normal --time=00:10:00 --environment=mctsvo bash -c '
+  export NUMBA_CACHE_DIR=/scratch/numba-cache
+  mkdir -p "$NUMBA_CACHE_DIR"
+  cd "$MCTSVO_REPO/mctsVoRos"
+  time python3 -c "
+import MCTS_VO.bettergym.compiled_utils
+import MCTS_VO.mcts_utils
+import MCTS_VO.bettergym.agents.utils.utils
+print(\"compiled\")"
+  ls -1 "$NUMBA_CACHE_DIR" | wc -l'
+```
+
+`/scratch` is a bind mount shared by every node, so one warm-up covers a whole
+campaign; `run_all_worker.sh` defaults `NUMBA_CACHE_DIR` there. A node-local
+`/tmp/numba-shared` also works but has to be rebuilt on every node.
+
+The cache is keyed on the source path and contents and invalidates itself when
+the code changes. If a run behaves oddly after editing a jitted function,
+deleting the directory rules the cache out.
