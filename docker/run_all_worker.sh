@@ -75,9 +75,40 @@ mkdir -p "${LOG_DIR}"
 CSV="${SCENE_DIR}/data_${ALGO}_${seed}.csv"
 LOG="${LOG_DIR}/${ALGO}_${seed}.log"
 
+# Resume, but only over a run made with THESE parameters. The check used to be
+# a bare [[ -f "$CSV" ]], and the filename carries only algorithm and seed, so a
+# leftover from any earlier experiment counted as "already done". That happened:
+# a campaign re-run at c=5.0 skipped 26 of 30 seeds still on disk from a c=1.0
+# run, and the summariser then averaged the mixture. It looked like the same
+# configuration producing 7% and 37% goal on different days, and cost a day of
+# chasing a nondeterminism that was not there. A mismatched CSV is overwritten,
+# not skipped: the parameters this task was given are the intended ones.
+params_match() {
+    awk -F, -v want="$RS|$GAMMA|$C|$MOV|${MAX_OBS_RADIUS:-0.5}|${VO_GEOMETRY:-paper}" '
+        NR == 1 { for (i = 1; i <= NF; i++) h[$i] = i; next }
+        NR == 2 {
+            split(want, w, "|")
+            n = split("radiusScale gammaPerSecond explorationC maxObsVel maxObsRadius", num, " ")
+            for (i = 1; i <= n; i++) {
+                # A column the CSV predates is a mismatch, not a pass.
+                if (!(num[i] in h)) exit 1
+                if (($h[num[i]] - w[i]) ^ 2 > 1e-12) exit 1
+            }
+            if (!("voGeometry" in h) || $h["voGeometry"] != w[6]) exit 1
+            exit 0
+        }
+        END { if (NR < 2) exit 1 }   # header only, or empty
+    ' "$1"
+}
+
 if [[ -f "${CSV}" ]]; then
-    echo "task $task_id: ${ALGO} ${SCENE} seed ${seed} already done"
-    exit 0
+    if params_match "${CSV}"; then
+        echo "task $task_id: ${ALGO} ${SCENE} seed ${seed} already done"
+        exit 0
+    fi
+    echo "task $task_id: ${CSV} exists but was produced with different" >&2
+    echo "  parameters than this task's (rs=${RS} gamma=${GAMMA} c=${C}" >&2
+    echo "  mov=${MOV}); re-running and overwriting it." >&2
 fi
 
 # ---------- ROS & environment ----------
