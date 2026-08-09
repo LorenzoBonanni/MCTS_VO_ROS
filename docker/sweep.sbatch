@@ -21,17 +21,21 @@
 #SBATCH --array=0-1
 #SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/sweep_%A_%a.out
 
-export ALGORITHM="VO-TREE"
+# Every axis is overridable. Hardcoding any of them makes an override on the
+# sbatch line silently do nothing, which is indistinguishable from a sweep that
+# ran and found no effect - RS_VALS and C_VALS were both in that state.
+# Remember to resize --array with the grid.
+export ALGORITHM="${ALGORITHM:-VO-TREE}"
 export TRAJECTORIES="${TRAJECTORIES:-intention}"
-export RS_VALS="1.4 1.6"
+export RS_VALS="${RS_VALS:-1.4 1.6}"
 export GAMMA_VALS="${GAMMA_VALS:-0.50}"
-export C_VALS="2.0 5.0"
-export VO_GEOMETRIES="paper"      # "legacy" A/B is settled, see git log
-export NUM_EXP=50
+export C_VALS="${C_VALS:-2.0 5.0}"
+export VO_GEOMETRIES="${VO_GEOMETRIES:-paper}"   # "legacy" A/B settled, see git log
+export NUM_EXP="${NUM_EXP:-50}"
 # Must be >= the fastest obstacle in the scene or the VO guarantee fails.
 # True maxima: 0.1 m/s on the easy scenes, 0.2 on the _complex ones.
-export MAX_OBS_VEL_VALS="0.125 0.15 0.25"
-export MAX_OBS_RADIUS=0.5         # applied before --radius-scale
+export MAX_OBS_VEL_VALS="${MAX_OBS_VEL_VALS:-0.125 0.15 0.25}"
+export MAX_OBS_RADIUS="${MAX_OBS_RADIUS:-0.5}"   # applied before --radius-scale
 export ROLLOUT_COLLISION="check"
 
 # Hardcoded, not "${SWEEP_DIR:-...}": this is the only bind mount that survives
