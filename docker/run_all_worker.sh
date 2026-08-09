@@ -43,10 +43,15 @@ SCENE="${TRAJ_ARR[$traj_idx]}"
 # Four cases, not two globs: sinusoidal* and intention* used to share a value,
 # which is how the easy scenes inherited the complex tuning and fell to 91% and
 # 16% goal in the 2400-run campaign.
+# MOV must be >= the fastest obstacle in the scene or the VO guarantee fails.
+# True maxima are 0.1 m/s on the easy scenes and 0.2 on the _complex ones, so
+# 0.15 is the tightest value the easy ones admit with margin. The sweep put
+# 0.125, 0.15 and 0.25 within a few points of each other there, so this is
+# chosen for being physically right rather than for a measured gain.
 case "$SCENE" in
-    sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.25 ;;
+    sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.15 ;;
     sinusoidal_complex)  RS=1.4; GAMMA=0.04; C=5.0;  MOV=0.25 ;;
-    intention)           RS=1.4; GAMMA=0.50; C=5.0;  MOV=0.25 ;;
+    intention)           RS=1.4; GAMMA=0.50; C=5.0;  MOV=0.15 ;;
     intention_complex)   RS=1.4; GAMMA=0.30; C=5.0;  MOV=0.25 ;;
     *) echo "no tuned parameters for scene '$SCENE'" >&2; exit 1 ;;
 esac
