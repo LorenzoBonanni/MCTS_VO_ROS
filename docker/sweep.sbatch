@@ -9,40 +9,34 @@
 #SBATCH --partition=normal
 #SBATCH --job-name=mctsvo-sweep
 #SBATCH --time=06:00:00
-# GAMMA EXTENSION, ROUND 3: below 0.10, with 0.10 as control.
-# 2 rs * 4 gamma * 2 c * 2 scenes * 1 mov * 1 vo = 32 cells, 100 seeds each.
+# EASY SCENES: the gamma sweep they never got.
+# 2 rs * 4 gamma * 2 c * 2 scenes * 1 mov * 1 vo = 32 cells, 50 seeds each.
 #
-# Rounds 1-2 swept 0.10 through 0.65. The result: VO-TREE beats VO-PLANNER on
-# both complex scenes once the horizon is short enough, with 0% voluntary
-# collisions throughout.
+# Rounds 1-3 swept the COMPLEX scenes (obstacles at 0.2 m/s) and settled on
+# 0.04/s for sinusoidal* and 0.30/s for intention*. Those values were then
+# extrapolated to the easy scenes by the sinusoidal*/intention* glob in
+# run_all_worker.sh, on the argument that halving the obstacle speed leaves the
+# frozen-obstacle model comfortably valid. True, but it only considered the
+# horizon being too LONG. The 2400-run campaign showed the opposite failure:
 #
-#   intention_complex   96% at gamma=0.30 rs=1.4 c=5.0 (VO-PLANNER 76%)
-#   sinusoidal_complex  84% at gamma=0.10 rs=1.4 c=5.0 (VO-PLANNER 66%)
+#   intention/VO-TREE     16% goal, 83% obsColl   (was 48% at gamma=0.65)
+#   sinusoidal/VO-TREE    91% goal                (was 98% at DEPTH=200)
 #
-# The mechanism is the frozen-obstacle model (paper 4.2.1): the search holds
-# obstacles where they were observed, so it stays usable only while they have
-# not moved far. Effective horizon is dt/(1 - gamma^dt), and the condition is
-# v_closing * horizon < r_R + r_i = 0.15 + 0.10 = 0.25 m. That inequality does
-# not predict an optimum, it predicts a BREAKING POINT, and intention_complex
-# lands on it: 88-92% goal for every gamma where the obstacle covers <= 71% of
-# the margin, then 6% at gamma=0.43 where it covers 99%, then 0% beyond.
+# At 0.1 m/s an obstacle covers only 35% of the 0.25 m margin over a 0.88 s
+# horizon, so validity is not the binding constraint on these scenes - the
+# planner is simply blind. The rule is the LONGEST horizon that keeps
+# v_closing * horizon inside the margin, which at 0.1 m/s allows about 2.5 s,
+# i.e. gamma up to ~0.67. Hence 0.30 (the current value, as control) through
+# 0.80, which is deliberately past that boundary so the cliff is visible if
+# there is one.
 #
-#   gamma/s   0.10  0.15  0.20  0.30  0.43  0.55  0.65
-#   horizon    4.9   5.8   6.7   8.8  12.4  17.2  23.7  steps
-#   moves/margin 39%  46%   54%   71%   99%  138%  190%
-#   intention  90%   88%   92%   88%    6%    0%    0%
-#   sinusoidal 79%   56%   49%   12%    3%    3%   26%
+# Note gamma now sets the rollout budget too, since DEPTH is derived from the
+# discount: 115 steps at 0.30 and the 200-step cap at 0.50 and above. So this
+# sweep moves depth as well as horizon, which is the point - the easy scenes
+# inherited both from scenes with twice the obstacle speed.
 #
-# sinusoidal_complex degrades monotonically rather than falling off a cliff, and
-# was still improving at 0.10 - hence this round. Two purposes: find where it
-# stops improving (as the horizon approaches one step VO-TREE degenerates into
-# VO-PLANNER, so the point where the curve flattens says whether lookahead
-# contributes anything at all), and top the 0.10 cells from 50 to 100 seeds so
-# that seeds 50-99 are an out-of-sample check on the 84%, which is the maximum
-# of 4 cells and therefore biased upward. Analyse those seeds separately.
-#
-# rs and c both take the two per-scene tuned values, since the sweep applies one
-# setting to both scenes and they disagree (sin: rs=1.4 c=5.0, int: rs=1.6 c=2.0).
+# rs and c span the values the complex scenes settled on, since the easy scenes
+# have no tuning of their own and the sweep applies one setting to both.
 # Full grid, to restore:
 #   RS_VALS="1.2 1.4 1.6"  GAMMA_VALS="0.65 0.81 0.90 0.95"
 #   C_VALS="0.5 1.0 2.0 5.0"  MAX_OBS_VEL_VALS="0.2 0.25"
@@ -58,12 +52,12 @@
 
 export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
 # The scene names are directory names under debug/ and keys of ENV_BUILDS in
-# loopHandler_copy.py. These are the _complex variants, which is what every
-# sweep so far has actually run: sweep_worker.sh used to hard-code them and
-# ignore this export, which read "sinusoidal intention" - the easy scenes.
-export TRAJECTORIES="sinusoidal_complex intention_complex"
+# loopHandler_copy.py. The EASY variants here: 2 moving obstacles at 0.1 m/s,
+# against 4 at up to 0.2 in the _complex ones. They are the only scenes whose
+# gamma has never been swept.
+export TRAJECTORIES="sinusoidal intention"
 export RS_VALS="1.4 1.6"
-export GAMMA_VALS="0.02 0.04 0.07 0.10"
+export GAMMA_VALS="0.30 0.50 0.65 0.80"
 export C_VALS="2.0 5.0"
 # "paper" is Algorithm 4 as written: tangents to r1, ignore beyond r0 + r1,
 # trapped below r1. The comparison against "legacy" (tangents to r0 + r1,
@@ -71,10 +65,9 @@ export C_VALS="2.0 5.0"
 # x 50 seeds, paper gave 0% voluntary collisions in every cell against legacy's
 # 2-4%, with goal rate unchanged. Add "legacy" back to re-run that comparison.
 export VO_GEOMETRIES="paper"
-# 100: the 0.10 cells already hold seeds 0-49 and the worker skips runs whose
-# CSV exists, so this adds seeds 50-99 to them and runs all 100 for the new
-# gamma values. Those extra 50 are the out-of-sample check on the 84% cell.
-export NUM_EXP=100                # independent seeds per combination
+# 50 is enough to place the curve; the best cell then wants an out-of-sample
+# check before it is quoted, as every previous round's maximum regressed.
+export NUM_EXP=50                 # independent seeds per combination
 # Swept axis. Must be >= the fastest obstacle in the scene or the VO safety
 # guarantee does not hold. The .unity files override the move_*.cs defaults:
 # max_speed/maxSpeed are 0.2 on the fastest instances in both complex scenes,
