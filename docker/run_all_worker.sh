@@ -60,17 +60,28 @@ SCENE="${TRAJ_ARR[$traj_idx]}"
 # over 100). Expect roughly 80% on sinusoidal_complex and 88% on
 # intention_complex, not the 87% / 96% the best cells report.
 #
-# 0.04 rather than 0.10 for sinusoidal* because 0.10 is the last point before
-# the drop to 56%, and sitting on a boundary is how a scene change turns into a
-# collapse. 0.30 for intention* is likewise inside its plateau, not at the edge.
+# The easy scenes were then swept in their own right, and want a much LONGER
+# horizon: their obstacles move at 0.1 m/s instead of 0.2, so the same
+# displacement takes twice as long and the model stays usable further ahead.
 #
-# The easy scenes were not swept. Their obstacles run at 0.1 m/s rather than
-# 0.2, so the same gamma leaves the model comfortably inside its validity
-# region - the risk there is a horizon that is shorter than it needs to be,
-# not one that is too long.
+#   gamma/s            0.30  0.50  0.65  0.80
+#   moves/margin        35%   60%   95%  181%
+#   intention           22%   56%   36%    0%
+#   sinusoidal          74%   72%   98%   40%
+#
+# Both collapse at 0.80, where the obstacle covers 181% of the margin - the
+# same boundary the complex scenes hit. The rule is the LONGEST horizon that
+# still fits inside the margin, and it lands on a different value for each
+# scene.
+#
+# Hence four cases, not two globs. sinusoidal* and intention* used to share a
+# setting, which is exactly how the easy scenes inherited 0.04 and 0.30 from
+# the complex ones and dropped to 91% and 16% in the 2400-run campaign.
 case "$SCENE" in
-    sinusoidal*) RS=1.4; GAMMA=0.04; C=5.0;  MOV=0.25 ;;
-    intention*)  RS=1.4; GAMMA=0.30; C=5.0;  MOV=0.25 ;;
+    sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.25 ;;
+    sinusoidal_complex)  RS=1.4; GAMMA=0.04; C=5.0;  MOV=0.25 ;;
+    intention)           RS=1.4; GAMMA=0.50; C=5.0;  MOV=0.25 ;;
+    intention_complex)   RS=1.4; GAMMA=0.30; C=5.0;  MOV=0.25 ;;
     *) echo "no tuned parameters for scene '$SCENE'" >&2; exit 1 ;;
 esac
 # Overridable, but the defaults above are the tuned ones.
