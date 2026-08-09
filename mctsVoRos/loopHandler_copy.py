@@ -267,6 +267,17 @@ DISCOUNT = GAMMA_S ** dt
 # simulation - so the point is not computing meaningless numbers, not speed.
 # Results measured at the old fixed 200 are not directly comparable: quote the
 # `depth` column, which is in every CSV, when comparing across runs.
+# Bumped by hand whenever a change makes previously recorded runs
+# incomparable - a new DEPTH rule, a reward change, a fix to the dynamics.
+# run_all_worker.sh greps this value out of this file and refuses to count an
+# existing CSV as done unless it carries the same epoch, so stale results are
+# re-run instead of silently inherited. Listing individual parameters there was
+# not enough: DEPTH became a function of gamma, every listed parameter still
+# matched, and a whole campaign skipped itself in seconds.
+#   1: everything up to and including the 2400-run campaign (fixed DEPTH = 200)
+#   2: DEPTH derived from the discount
+PARAM_EPOCH = 2
+
 TAIL_WEIGHT = 1e-6
 DEPTH = min(int(math.ceil(math.log(TAIL_WEIGHT) / math.log(DISCOUNT))),
             int(round(HORIZON_S / dt)))
@@ -1275,6 +1286,7 @@ def save_data(loopHandler, exp_num):
         "thinkMargin": THINK_MARGIN,
         "horizonS": HORIZON_S,
         "depth": DEPTH,
+        "paramEpoch": PARAM_EPOCH,
         "radiusScale": RADIUS_SCALE,
         "maxObsRadius": MAX_OBS_RADIUS,
         "voGeometry": cli_args.vo_geometry,

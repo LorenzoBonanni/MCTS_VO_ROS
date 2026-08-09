@@ -54,7 +54,7 @@ echo "summarised $n parameter sets"
 # directory name, which is the only place they are recorded for certain.
 # --------------------------------------------------
 combine() {   # $1 = per-set file, $2 = combined file
-    local first=1 f name rs g c mov mor vo
+    local first=1 f name rs g c mov mor ep vo
     : > "$SWEEP_DIR/$2"
     for d in "$SWEEP_DIR"/rs*/; do
         f="$d/$1"
@@ -77,12 +77,16 @@ combine() {   # $1 = per-set file, $2 = combined file
             *)      mor="unknown" ;;
         esac
         case "$name" in
+            *_e*) ep="${name#*_e}"; ep="${ep%%_*}" ;;
+            *)    ep="unknown" ;;
+        esac
+        case "$name" in
             *_vo*) vo="${name##*_vo}" ;;
             *)     vo="unknown" ;;
         esac
-        awk -v n="$name" -v rs="$rs" -v g="$g" -v c="$c" -v mov="$mov" -v mor="$mor" -v vo="$vo" -v first="$first" '
-            NR == 1 { if (first) print "config,radius_scale,gamma_per_second,exploration_c,max_obs_vel,max_obs_radius,vo_geometry," $0; next }
-            { print n "," rs "," g "," c "," mov "," mor "," vo "," $0 }' "$f" >> "$SWEEP_DIR/$2"
+        awk -v n="$name" -v rs="$rs" -v g="$g" -v c="$c" -v mov="$mov" -v mor="$mor" -v ep="$ep" -v vo="$vo" -v first="$first" '
+            NR == 1 { if (first) print "config,radius_scale,gamma_per_second,exploration_c,max_obs_vel,max_obs_radius,param_epoch,vo_geometry," $0; next }
+            { print n "," rs "," g "," c "," mov "," mor "," ep "," vo "," $0 }' "$f" >> "$SWEEP_DIR/$2"
         first=0
     done
 }

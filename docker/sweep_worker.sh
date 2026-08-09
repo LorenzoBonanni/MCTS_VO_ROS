@@ -124,7 +124,17 @@ VO="${vo_values[$vo_idx]}"
 # the second, silently merging two configurations into one result. That is what
 # happened between the full sweep (MAX_OBS_RADIUS=0.5) and the perception probe
 # (5.0): same rs/gamma/c/mov, same directory, different meaning.
-NAME="rs${RS}_g${GAMMA}_c${C}_mov${MOV}_mor${MAX_OBS_RADIUS}_vo${VO}"
+# PARAM_EPOCH is read out of loopHandler_copy.py, not duplicated, and put in
+# the cell name so that a bump lands in fresh directories instead of topping up
+# cells produced by different code. Placed before _vo so the summariser's
+# "${name##*_vo}" still ends the name.
+PARAM_EPOCH="$(grep -oE '^PARAM_EPOCH = [0-9]+' \
+    "$REPO/mctsVoRos/loopHandler_copy.py" | grep -oE '[0-9]+$')"
+if [[ -z "$PARAM_EPOCH" ]]; then
+    echo "could not read PARAM_EPOCH from loopHandler_copy.py" >&2
+    exit 1
+fi
+NAME="rs${RS}_g${GAMMA}_c${C}_mov${MOV}_mor${MAX_OBS_RADIUS}_e${PARAM_EPOCH}_vo${VO}"
 
 # --------------------------------------------------
 # 1.5 ROS

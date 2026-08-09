@@ -99,8 +99,20 @@ LOG="${LOG_DIR}/${ALGO}_${seed}.log"
 # configuration producing 7% and 37% goal on different days, and cost a day of
 # chasing a nondeterminism that was not there. A mismatched CSV is overwritten,
 # not skipped: the parameters this task was given are the intended ones.
+# The epoch is read out of the source rather than duplicated here, so the two
+# cannot drift. Listing individual parameters was not enough on its own: DEPTH
+# became a function of gamma, every listed parameter still matched, and a whole
+# campaign skipped itself in seconds while inheriting runs from the old rule.
+PARAM_EPOCH="$(grep -oE '^PARAM_EPOCH = [0-9]+' \
+    "${MCTSVO_REPO:-/workspace/MCTS_VO_ROS}/mctsVoRos/loopHandler_copy.py" \
+    | grep -oE '[0-9]+$')"
+if [[ -z "$PARAM_EPOCH" ]]; then
+    echo "could not read PARAM_EPOCH from loopHandler_copy.py" >&2
+    exit 1
+fi
+
 params_match() {
-    awk -F, -v want="$RS|$GAMMA|$C|$MOV|${MAX_OBS_RADIUS:-0.5}|${VO_GEOMETRY:-paper}" '
+    awk -F, -v want="$RS|$GAMMA|$C|$MOV|${MAX_OBS_RADIUS:-0.5}|${VO_GEOMETRY:-paper}|$PARAM_EPOCH" '
         NR == 1 { for (i = 1; i <= NF; i++) h[$i] = i; next }
         NR == 2 {
             split(want, w, "|")
@@ -111,6 +123,9 @@ params_match() {
                 if (($h[num[i]] - w[i]) ^ 2 > 1e-12) exit 1
             }
             if (!("voGeometry" in h) || $h["voGeometry"] != w[6]) exit 1
+            # Runs predating the stamp have no epoch column and are therefore
+            # from epoch 1 or earlier: never reusable once it has been bumped.
+            if (!("paramEpoch" in h) || ($h["paramEpoch"] + 0) != (w[7] + 0)) exit 1
             exit 0
         }
         END { if (NR < 2) exit 1 }   # header only, or empty
