@@ -1,5 +1,4 @@
 import gc
-import math
 import os
 import pickle
 import random
@@ -244,22 +243,25 @@ MAX_SENSOR_AGE = (dt + THINK_MARGIN if cli_args.max_sensor_age is None
 GAMMA_S = cli_args.gamma_per_second
 DISCOUNT = GAMMA_S ** dt
 
-# Rollout depth, derived from the discount instead of fixed. A reward arriving
-# at step k is worth DISCOUNT**k, so simulating past the point where that falls
-# below TAIL_WEIGHT cannot change any decision. DEPTH was 200 for years, which
-# is what 1e-4 asks for at the old gamma of 0.65/s (0.958/step) - so the
-# constant was silently tracking a discount nobody had chosen deliberately, and
-# stayed put when the discount moved. At 0.04/s (0.725/step) 22 steps carry the
-# same 1e-4 of weight and DISCOUNT**200 is 1e-28.
+# Rollout depth. Deliberately a fixed 200 (HORIZON_S / dt) and NOT derived from
+# the discount, though deriving it is tempting: DISCOUNT**200 is 1e-28 at
+# gamma = 0.04/s, so on the face of it the last ~170 steps compute nothing.
 #
-# This is about not computing meaningless numbers, not about speed: a 200-step
-# fused_rollout is ~11 us against ~277 us per simulation, so the saving is a few
-# per cent. Note the rollout can then no longer physically reach a distant goal
-# (22 steps is 0.48 m of travel) - but at these discounts a terminal reward that
-# far out is weighted below 1e-14 and was never visible to the decision anyway.
-TAIL_WEIGHT = 1e-4
-DEPTH = min(int(math.ceil(math.log(TAIL_WEIGHT) / math.log(DISCOUNT))),
-            int(round(HORIZON_S / dt)))
+# Two reasons it stays fixed. First, the tail is not negligible for TERMINAL
+# rewards. The per-step reward is -dist/max_eudist, in [-1, 0], but reaching the
+# goal is +100 and a collision -100. At gamma = 0.30/s (0.887/step) a goal found
+# at step 77 is still worth 0.0027 * 100 = 0.27, against a root Q-value spread
+# of about 0.06 - four times the signal the planner discriminates on. A cutoff
+# chosen against the per-step scale silently truncates events 100x larger.
+#
+# Second, the saving is not worth the cost of invalidating comparisons: a
+# 200-step fused_rollout is ~11 us against ~277 us per simulation, i.e. ~4% of
+# planning time, while every sweep and campaign to date ran at 200. Changing it
+# would mean none of those results transfer.
+#
+# If it is ever revisited, size the tail against the terminal rewards
+# (TAIL_WEIGHT / 100) and A/B it against a fixed 200 on a full cell.
+DEPTH = int(round(HORIZON_S / dt))
 
 # Environment executable and output directory for the selected trajectories
 env_build = cli_args.env_build or ENV_BUILDS[trajectories]
