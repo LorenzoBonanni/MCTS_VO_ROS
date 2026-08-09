@@ -1,4 +1,5 @@
 import gc
+import math
 import os
 import pickle
 import random
@@ -201,11 +202,12 @@ if PLAN_BUDGET is None:
 else:
     THINK_MARGIN = PLAN_BUDGET + SENSE_ALLOWANCE
 
-# Planning horizon in seconds rather than in simulation steps, so it stays put
-# when the control period changes: as a fixed depth of 200 it would silently
-# halve whenever dt did. 20 s reproduces the paper's depth at ts = 0.1.
+# Upper bound on the planning horizon, in seconds rather than in simulation
+# steps so it stays put when the control period changes: as a fixed depth of
+# 200 it would silently halve whenever dt did. The depth actually used is
+# derived from the discount below and is normally far smaller than this; the
+# cap only bites for discounts close to 1.
 HORIZON_S = 20.0
-DEPTH = int(round(HORIZON_S / dt))
 
 # Episode length as a time budget rather than a step count. As a fixed 350
 # steps it silently shrank with dt: at dt = 0.05 an episode allowed 17.5 s of
@@ -241,6 +243,23 @@ MAX_SENSOR_AGE = (dt + THINK_MARGIN if cli_args.max_sensor_age is None
 # period: as a bare per-step constant it silently halved whenever dt did.
 GAMMA_S = cli_args.gamma_per_second
 DISCOUNT = GAMMA_S ** dt
+
+# Rollout depth, derived from the discount instead of fixed. A reward arriving
+# at step k is worth DISCOUNT**k, so simulating past the point where that falls
+# below TAIL_WEIGHT cannot change any decision. DEPTH was 200 for years, which
+# is what 1e-4 asks for at the old gamma of 0.65/s (0.958/step) - so the
+# constant was silently tracking a discount nobody had chosen deliberately, and
+# stayed put when the discount moved. At 0.04/s (0.725/step) 22 steps carry the
+# same 1e-4 of weight and DISCOUNT**200 is 1e-28.
+#
+# This is about not computing meaningless numbers, not about speed: a 200-step
+# fused_rollout is ~11 us against ~277 us per simulation, so the saving is a few
+# per cent. Note the rollout can then no longer physically reach a distant goal
+# (22 steps is 0.48 m of travel) - but at these discounts a terminal reward that
+# far out is weighted below 1e-14 and was never visible to the decision anyway.
+TAIL_WEIGHT = 1e-4
+DEPTH = min(int(math.ceil(math.log(TAIL_WEIGHT) / math.log(DISCOUNT))),
+            int(round(HORIZON_S / dt)))
 
 # Environment executable and output directory for the selected trajectories
 env_build = cli_args.env_build or ENV_BUILDS[trajectories]
@@ -1099,11 +1118,17 @@ def save_data(loopHandler, exp_num):
         tree_depths = [i["max_tree_depth"] for i in loopHandler.infos]
         rollout_depths = [i["max_rollout_depth"] for i in loopHandler.infos]
         total_depths = [i["max_total_depth"] for i in loopHandler.infos]
+        # The mean rollout length, as opposed to the per-plan maximum above.
+        # The maximum is pinned to the budget whenever any rollout runs to the
+        # end, which is why it read as a constant 199 in every campaign so far;
+        # the mean is what shows how often rollouts terminate early.
+        mean_rollout_depths = [i["mean_rollout_depth"] for i in loopHandler.infos]
         pickle.dump(
             {
                 "max_tree_depth": tree_depths,
                 "max_rollout_depth": rollout_depths,
                 "max_total_depth": total_depths,
+                "mean_rollout_depth": mean_rollout_depths,
             },
             open(f"{out_dir}/depths_{suffix}.pkl", 'wb')
         )
@@ -1113,6 +1138,7 @@ def save_data(loopHandler, exp_num):
         tree_depths = []
         rollout_depths = []
         total_depths = []
+        mean_rollout_depths = []
 
     # Save various data attributes of the loopHandler to pickle files for debugging
     pickle.dump(loopHandler.actions, open(f"{out_dir}/acts_{suffix}.pkl", 'wb'))
@@ -1212,6 +1238,10 @@ def save_data(loopHandler, exp_num):
         "meanTreeDepth": np.mean(tree_depths) if tree_depths else np.nan,
         "maxRolloutDepth": np.max(rollout_depths) if rollout_depths else np.nan,
         "meanRolloutDepth": np.mean(rollout_depths) if rollout_depths else np.nan,
+        # Mean over rollouts, not over per-plan maxima: the length a typical
+        # rollout actually ran before reaching the goal, colliding or
+        # exhausting the budget.
+        "rolloutLen": np.mean(mean_rollout_depths) if mean_rollout_depths else np.nan,
         "maxTotalDepth": np.max(total_depths) if total_depths else np.nan,
         "meanTotalDepth": np.mean(total_depths) if total_depths else np.nan,
         # Per-phase timings, in seconds.
@@ -1234,6 +1264,7 @@ def save_data(loopHandler, exp_num):
         "planBudget": PLAN_BUDGET if PLAN_BUDGET is not None else np.nan,
         "thinkMargin": THINK_MARGIN,
         "horizonS": HORIZON_S,
+        "depth": DEPTH,
         "radiusScale": RADIUS_SCALE,
         "maxObsRadius": MAX_OBS_RADIUS,
         "voGeometry": cli_args.vo_geometry,

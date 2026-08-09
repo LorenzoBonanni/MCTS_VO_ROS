@@ -391,7 +391,9 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
                          fmt(mean_std(g, "meanRolloutDepth")[0], ".1f"),
                          fmt(mean_std(g, "maxRolloutDepth")[0], ".0f"),
                          fmt(mean_std(g, "meanTotalDepth")[0], ".1f"),
-                         fmt(mean_std(g, "maxTotalDepth")[0], ".0f")])
+                         fmt(mean_std(g, "maxTotalDepth")[0], ".0f"),
+                         fmt(mean_std(g, "rolloutLen")[0], ".1f"),
+                         fmt(mean_std(g, "depth")[0], ".0f")])
 
         s = smoothness(g, legacy_ts)
         smo_rows.append([label, fmt(s["m_vsm"], ".3f"), fmt(s["m_hsm"], ".3f"),
@@ -428,8 +430,10 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
           "(runs predating the step_stats instrumentation)." if any_derived else None)
 
     table("DEPTH", ["group", "treeMean", "treeMax", "rollMean", "rollMax",
-                    "totMean", "totMax"], dep_rows,
-          "blank for VO-PLANNER, which has no tree.")
+                    "totMean", "totMax", "rollLen", "budget"], dep_rows,
+          "blank for VO-PLANNER, which has no tree. rollMean/rollMax are per-plan "
+          "MAXIMA and pin to the budget; rollLen is the mean length a rollout "
+          "actually ran, and budget is the depth derived from the discount.")
 
     table("SMOOTHNESS", ["group", "m_vsm", "m_hsm", "stop%", "revers", "pathLen", "pathEff"],
           smo_rows,
@@ -485,6 +489,7 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
             "maxTreeDepth": r.get("maxTreeDepth"),
             "meanRolloutDepth": r.get("meanRolloutDepth"),
             "maxRolloutDepth": r.get("maxRolloutDepth"),
+            "rolloutLen": r.get("rolloutLen"), "depth": r.get("depth"),
             "ts": r.get("ts"), "radiusScale": r.get("radiusScale"),
             "explorationC": r.get("explorationC"),
             "gammaPerSecond": r.get("gammaPerSecond"),
