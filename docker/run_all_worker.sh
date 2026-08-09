@@ -32,51 +32,17 @@ algo_idx=$(( IDX / N_TRAJ ))
 ALGO="${ALGO_ARR[$algo_idx]}"
 SCENE="${TRAJ_ARR[$traj_idx]}"
 
-# Per-scene parameters. gamma dominates everything else, and the values below
-# are far lower than the 0.65 used until now, which was itself the floor of the
-# original grid rather than an optimum.
+# Per-scene parameters, from the gamma sweeps. gamma dominates everything else.
 #
-# Why: the search holds obstacles at their observed position (paper 4.2.1), so
-# it is only usable while they have not moved far. The effective horizon is
-# dt/(1 - gamma^dt) and the condition is v_closing * horizon < r_R + r_i, i.e.
-# 0.15 + 0.10 = 0.25 m. At gamma=0.65 the horizon is 23.7 steps and a 0.2 m/s
-# obstacle covers 47 cm - nearly twice the whole margin - so "stand still"
-# scores as risk-free while being the most dangerous action available. That is
-# what produced 68-96% obstacle-initiated collisions in the 600-run campaign.
+# The search freezes obstacles (paper 4.2.1), so it is only usable while they
+# have not moved far: horizon = dt/(1 - gamma^dt), and it must satisfy
+# v_closing * horizon < r_robot + r_obs = 0.25 m. Take the LONGEST horizon that
+# still fits. Faster obstacles therefore want a smaller gamma, and all four
+# scenes collapse once the obstacle covers ~100% of the margin.
 #
-# The gamma sweep (0.02-0.65, 2 rs x 2 c x 2 scenes) found a plateau on each
-# scene, ending where the validity condition is violated:
-#
-#   gamma/s           0.02 0.04 0.07 0.10 0.15 0.20 0.30 0.43 0.55 0.65
-#   moves/margin       25%  29%  34%  39%  46%  54%  71%  99% 138% 190%
-#   intention_complex  88%  85%  86%  91%  88%  92%  88%   6%   0%   0%
-#   sinusoidal_complex 80%  83%  79%  78%  56%  49%  12%   3%   3%  26%
-#
-# intention tolerates up to 71% of the margin, sinusoidal only ~39% - four
-# obstacles rather than two means more simultaneous encounters. Both are flat
-# below their boundary, so gamma is chosen mid-plateau rather than at its best
-# cell: the per-cell maxima are selection artefacts, and the one we tested
-# out-of-sample confirmed it (84% at gamma=0.10 became 74% on fresh seeds, 79%
-# over 100). Expect roughly 80% on sinusoidal_complex and 88% on
-# intention_complex, not the 87% / 96% the best cells report.
-#
-# The easy scenes were then swept in their own right, and want a much LONGER
-# horizon: their obstacles move at 0.1 m/s instead of 0.2, so the same
-# displacement takes twice as long and the model stays usable further ahead.
-#
-#   gamma/s            0.30  0.50  0.65  0.80
-#   moves/margin        35%   60%   95%  181%
-#   intention           22%   56%   36%    0%
-#   sinusoidal          74%   72%   98%   40%
-#
-# Both collapse at 0.80, where the obstacle covers 181% of the margin - the
-# same boundary the complex scenes hit. The rule is the LONGEST horizon that
-# still fits inside the margin, and it lands on a different value for each
-# scene.
-#
-# Hence four cases, not two globs. sinusoidal* and intention* used to share a
-# setting, which is exactly how the easy scenes inherited 0.04 and 0.30 from
-# the complex ones and dropped to 91% and 16% in the 2400-run campaign.
+# Four cases, not two globs: sinusoidal* and intention* used to share a value,
+# which is how the easy scenes inherited the complex tuning and fell to 91% and
+# 16% goal in the 2400-run campaign.
 case "$SCENE" in
     sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.25 ;;
     sinusoidal_complex)  RS=1.4; GAMMA=0.04; C=5.0;  MOV=0.25 ;;
@@ -102,18 +68,11 @@ mkdir -p "${LOG_DIR}"
 CSV="${SCENE_DIR}/data_${ALGO}_${seed}.csv"
 LOG="${LOG_DIR}/${ALGO}_${seed}.log"
 
-# Resume, but only over a run made with THESE parameters. The check used to be
-# a bare [[ -f "$CSV" ]], and the filename carries only algorithm and seed, so a
-# leftover from any earlier experiment counted as "already done". That happened:
-# a campaign re-run at c=5.0 skipped 26 of 30 seeds still on disk from a c=1.0
-# run, and the summariser then averaged the mixture. It looked like the same
-# configuration producing 7% and 37% goal on different days, and cost a day of
-# chasing a nondeterminism that was not there. A mismatched CSV is overwritten,
-# not skipped: the parameters this task was given are the intended ones.
-# The epoch is read out of the source rather than duplicated here, so the two
-# cannot drift. Listing individual parameters was not enough on its own: DEPTH
-# became a function of gamma, every listed parameter still matched, and a whole
-# campaign skipped itself in seconds while inheriting runs from the old rule.
+# Resume, but only over a run made with THESE parameters. A bare [[ -f ]] once
+# let a c=5.0 campaign inherit 26 of 30 seeds from a c=1.0 run, and listing
+# parameters alone was not enough either: when DEPTH became a function of gamma
+# every listed value still matched and a whole campaign skipped itself. Hence
+# also PARAM_EPOCH, read from the source so the two cannot drift.
 PARAM_EPOCH="$(grep -oE '^PARAM_EPOCH = [0-9]+' \
     "${MCTSVO_REPO:-/workspace/MCTS_VO_ROS}/mctsVoRos/loopHandler_copy.py" \
     | grep -oE '[0-9]+$')"
@@ -162,17 +121,10 @@ set -e
 # Unique isolation per task
 export ROS_DOMAIN_ID=$(( task_id % 101 ))
 export ROS_LOCALHOST_ONLY=1
-# Shared, deliberately. Here one task is a single run, so a per-task cache meant
-# every one of the 360 runs recompiled the jitted kernels from scratch - about
-# 15 s each. Every @jit in this project carries an explicit signature, so the
-# kernels compile eagerly at import and the cache can be populated once, ahead
-# of the campaign, by importing the modules (see docker/README.md).
-#
-# Default is /scratch, which is a bind mount and therefore shared by every node,
-# so a single warm-up covers the whole campaign. Numba writes cache entries with
-# atomic renames and keys them on the source path, which is identical across
-# nodes, so concurrent use is safe. Set NUMBA_CACHE_DIR to /tmp/numba-shared to
-# fall back to a node-local cache if the shared filesystem is ever a problem.
+# Shared on purpose: one task is one run, so a per-task cache recompiled the
+# jitted kernels every time (~15 s). /scratch is a bind mount, so one warm-up
+# covers the campaign; numba writes with atomic renames, so this is concurrency
+# safe. Use /tmp/numba-shared to fall back to node-local.
 export NUMBA_CACHE_DIR="${NUMBA_CACHE_DIR:-/scratch/numba-cache}"
 export MPLCONFIGDIR="/tmp/mpl-${task_id}"
 export HOME="/tmp/home-${task_id}"
@@ -187,17 +139,14 @@ export MKL_NUM_THREADS=1
 export NUMEXPR_NUM_THREADS=1
 export LOKY_MAX_CPU_COUNT="${SLURM_CPUS_PER_TASK:-4}"
 
-# ---------- Create isolated working directory with correct structure ----------
-# We mimic the original sweep: a cell directory containing the env_build symlink,
-# and a work subdirectory where the Python script actually runs.
+# Isolated working directory, mirroring the sweep layout: env_build one level
+# above the work directory, because loopHandler uses the relative ../env_build.
 CELL_DIR="/tmp/campaign-cell-${task_id}"
 WORK="${CELL_DIR}/work"
 mkdir -p "$WORK"
 
 REPO="${MCTSVO_REPO:-/workspace/MCTS_VO_ROS}"
 
-# env_build must be one level above the working directory, because
-# loopHandler_copy.py uses a relative path: ../env_build/...
 ln -sfn "$REPO/env_build" "$CELL_DIR/env_build"
 
 # Symlink the project code into the work directory
@@ -211,10 +160,7 @@ ln -sfn "$DEBUG_ROOT" "$WORK/debug"
 
 cd "$WORK"
 
-# Stagger the eight procs sharing this node so they do not all JIT-compile into
-# the empty shared cache simultaneously. Whoever gets there first populates it;
-# the rest find it warm. Costs at most 14 s once per node, and only when the
-# cache is cold.
+# Stagger the eight procs so they do not all JIT into a cold cache at once.
 sleep $(( SLURM_PROCID * 2 ))
 
 echo "task $task_id: ${ALGO} ${SCENE} seed ${seed} (rs=${RS} gamma=${GAMMA} c=${C} mov=${MOV})"

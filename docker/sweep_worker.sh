@@ -20,17 +20,13 @@ if [[ -z "${SLURM_ARRAY_TASK_ID}" || -z "${SLURM_PROCID}" ]]; then
 fi
 task_id=$(( SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID ))
 
-# Every one of these is set by sweep.sbatch. They are checked up front, and with
-# no defaults: a missing grid variable used to produce a zero-length array, hence
-# num_* == 0 and a division by zero forty lines below, which says nothing about
-# what is actually wrong.
+# All set by sweep.sbatch, checked up front with no defaults: a missing grid
+# variable used to surface as a division by zero forty lines further down.
 : "${SWEEP_DIR:?export SWEEP_DIR}"
 : "${MCTSVO_REPO:?export MCTSVO_REPO}"
 
-# Refuse to run against a path the container cannot persist. Only /root/sweep
-# and /scratch are bind mounts (see ~/.edf/mctsvo.toml); anything else lands in
-# the container's writable layer and is discarded when the job exits, which
-# looks exactly like success - every run reports "ok" and the results vanish.
+# Only /root/sweep and /scratch are bind mounts. Anything else lands in the
+# container's writable layer and vanishes on exit, looking exactly like success.
 case "$SWEEP_DIR" in
     /root/sweep|/root/sweep/*|/scratch/*) ;;
     *) echo "SWEEP_DIR=$SWEEP_DIR is not on a bind mount; results would be" >&2
@@ -49,14 +45,9 @@ esac
 REPO="$MCTSVO_REPO"
 
 # --------------------------------------------------
-# 1. The grid. ONE CELL PER TASK: the run number is NOT part of the index, the
-#    loop at the bottom covers it.
-#
-#    Every axis comes from sweep.sbatch. These lists used to be hard-coded here
-#    while sweep.sbatch exported RS_VALS/GAMMA_VALS/C_VALS/TRAJECTORIES that
-#    nothing read, so editing the sbatch changed nothing and the two files could
-#    disagree silently - which they did: the sbatch said "sinusoidal intention"
-#    while every sweep actually ran on the _complex scenes.
+# 1. The grid. ONE CELL PER TASK: the run number is not part of the index, the
+#    loop at the bottom covers it. Every axis comes from sweep.sbatch - these
+#    lists were once hard-coded here as well, and the two silently disagreed.
 # --------------------------------------------------
 IFS=' ' read -ra rs_values    <<< "$RS_VALS"
 IFS=' ' read -ra gamma_values <<< "$GAMMA_VALS"
@@ -78,12 +69,8 @@ if (( task_id >= total_cells )); then
     exit 0
 fi
 
-# configs.tsv is the grid manifest. Nothing reads it any more -
-# summarize_sweep_slurm.sh recovers the parameters from the directory names -
-# but it is the one place the intended grid is recorded, which matters when a
-# sweep is only partly finished and the directories are therefore incomplete.
-# The first task of the first array job writes it, once: any other task would
-# be racing, and every task has the same lists anyway.
+# configs.tsv records the intended grid, which matters when a sweep only partly
+# finishes. Nothing reads it. Written once, by the first task, to avoid a race.
 if (( SLURM_ARRAY_TASK_ID == 0 && SLURM_PROCID == 0 )); then
     mkdir -p "$SWEEP_DIR"
     {
@@ -118,16 +105,11 @@ C="${c_values[$c_idx]}"
 SCENE="${scenes[$scene_idx]}"
 MOV="${mov_values[$mov_idx]}"
 VO="${vo_values[$vo_idx]}"
-# Every parameter that varies BETWEEN SWEEPS must be in the cell name, not just
-# the ones swept within a single run. Two cells differing only in a field the
-# name omits share a directory, and the "already done" check below then skips
-# the second, silently merging two configurations into one result. That is what
-# happened between the full sweep (MAX_OBS_RADIUS=0.5) and the perception probe
-# (5.0): same rs/gamma/c/mov, same directory, different meaning.
-# PARAM_EPOCH is read out of loopHandler_copy.py, not duplicated, and put in
-# the cell name so that a bump lands in fresh directories instead of topping up
-# cells produced by different code. Placed before _vo so the summariser's
-# "${name##*_vo}" still ends the name.
+# Every parameter that varies BETWEEN sweeps belongs in the cell name, not only
+# the ones swept within one. Otherwise two configurations share a directory and
+# the "already done" check merges them - as happened at MAX_OBS_RADIUS 0.5 vs
+# 5.0. PARAM_EPOCH is read from the source rather than duplicated, and sits
+# before _vo so the summariser's "${name##*_vo}" still ends the name.
 PARAM_EPOCH="$(grep -oE '^PARAM_EPOCH = [0-9]+' \
     "$REPO/mctsVoRos/loopHandler_copy.py" | grep -oE '[0-9]+$')"
 if [[ -z "$PARAM_EPOCH" ]]; then
@@ -249,9 +231,8 @@ for (( exp_num = 0; exp_num < NUM_EXP; exp_num++ )); do
         failed=$(( failed + 1 ))
     fi
 
-    # Unity is launched by loopHandler and killed by it on the way out. If a
-    # run died before that, the player sits there holding a core. We kill it
-    # by matching on the working directory, which is unique per cell+scene.
+    # Kill a Unity player left behind by a run that died before loopHandler
+    # could stop it. Matched on the working directory, unique per cell+scene.
     for p in $(pgrep -f 'env_build/.*x86_64' 2>/dev/null); do
         if [[ "$(readlink -f /proc/$p/cwd 2>/dev/null)" == "$(readlink -f "$WORK")" ]]; then
             kill "$p" 2>/dev/null || true
