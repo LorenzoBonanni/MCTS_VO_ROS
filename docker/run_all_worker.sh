@@ -32,29 +32,32 @@ algo_idx=$(( IDX / N_TRAJ ))
 ALGO="${ALGO_ARR[$algo_idx]}"
 SCENE="${TRAJ_ARR[$traj_idx]}"
 
-# Per-scene parameters, from the 192-cell / 9600-run sweep. The two scene
-# families behave differently enough that a single setting is wrong for one of
-# them, so each takes its own. gamma is the dominant axis in both: on
-# sinusoidal_complex the goal rate falls 21.2% -> 0.1% going from 0.65 to 0.95,
-# with timeouts rising to 56%, so a short horizon wins clearly.
+# Per-scene parameters. gamma dominates everything else, and the values below
+# are far lower than the 0.65 used until now, which was itself the floor of the
+# original grid rather than an optimum.
 #
-# sinusoidal*: rs=1.4 g=0.65 c=5.0 mov=0.25 gave 36% goal and 0% voluntary
-#   collisions. The grid's best single cell was 50% at rs=1.2 mov=0.2, but that
-#   is the maximum of 96 noisy estimates at n=50 (so inflated by selection) and
-#   it sits at the least safe rs with no margin above the true obstacle speed.
-#   The whole gamma=0.65 c=5.0 region averages 33.3% goal (CI 28-39) with 1
-#   voluntary collision in 300 runs, and this cell is representative of it.
+# Why: the search holds obstacles at their observed position (paper 4.2.1), so
+# it is only usable while they have not moved far. The effective horizon is
+# dt/(1 - gamma^dt) and the condition is v_closing * horizon < r_R + r_i, i.e.
+# 0.15 + 0.10 = 0.25 m. At gamma=0.65 the horizon is 23.7 steps and a 0.2 m/s
+# obstacle covers 47 cm - nearly twice the whole margin - so "stand still"
+# scores as risk-free while being the most dangerous action available. That is
+# what produced 68-96% obstacle-initiated collisions in the 600-run campaign.
 #
-# intention*: no configuration works - the best cells reach 2%, i.e. one run in
-#   fifty, indistinguishable from zero across 48 configurations and 2400 runs.
-#   These values are therefore chosen on the marginals rather than on a winning
-#   cell: gamma=0.65 as above, rs=1.6 because voluntary collisions fall
-#   monotonically with rs (2.9 / 2.4 / 1.8 % for 1.2 / 1.4 / 1.6), c=2.0 as one
-#   of the two joint-best cells, mov=0.25 for headroom over the 0.2 m/s
-#   obstacles. Expect ~0% goal: the scene is a Section 6 immobilisation case.
+# The gamma sweep (0.02-0.65, 2 rs x 2 c x 2 scenes) gave, per scene:
+#   intention_complex   88-92% goal for every gamma where the obstacle covers
+#                       <= 71% of the margin, 6% at 0.43 (99%), 0% beyond.
+#                       Best cell 96% at gamma=0.30 rs=1.4 c=5.0, 0% volColl.
+#   sinusoidal_complex  monotonic, no cliff: 79/56/49/12/3/3/26 % over
+#                       0.10..0.65. Best cell 84% at gamma=0.10 rs=1.4 c=5.0.
+#
+# The easy scenes were not swept. Their obstacles run at 0.1 m/s rather than
+# 0.2, so the same gamma leaves the model comfortably inside its validity
+# region - the risk there is a horizon that is shorter than it needs to be,
+# not one that is too long.
 case "$SCENE" in
-    sinusoidal*) RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.25 ;;
-    intention*)  RS=1.6; GAMMA=0.65; C=2.0;  MOV=0.25 ;;
+    sinusoidal*) RS=1.4; GAMMA=0.10; C=5.0;  MOV=0.25 ;;
+    intention*)  RS=1.4; GAMMA=0.30; C=5.0;  MOV=0.25 ;;
     *) echo "no tuned parameters for scene '$SCENE'" >&2; exit 1 ;;
 esac
 # Overridable, but the defaults above are the tuned ones.

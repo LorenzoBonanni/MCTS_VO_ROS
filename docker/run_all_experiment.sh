@@ -9,16 +9,23 @@
 #SBATCH --partition=normal
 #SBATCH --job-name=mctsvo-campaign
 #SBATCH --time=08:00:00
-# 3 algos * 4 scenes * 50 seeds = 600 tasks. run_all_worker.sh computes
+# 3 algos * 4 scenes * 100 seeds = 1200 tasks. run_all_worker.sh computes
 # task_id = SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID, so with --ntasks-per-node=8
-# the array index runs 0..(600/8 - 1) = 0..74 and the task ids tile 0..599.
+# the array index runs 0..(1200/8 - 1) = 0..149 and the task ids tile 0..1199.
+#
+# 100 seeds, not 50: the question this campaign has to answer is whether VO
+# still buys a safety margin over plain MCTS once gamma is corrected. At the
+# old gamma that was obvious (82-90% voluntary collisions against 0-4%); at the
+# corrected gamma the MCTS rate on intention_complex fell to 4%, and 2/50
+# against 0/50 does not distinguish anything. Resolving a few percent needs
+# n=100 per cell.
 #
 # RESIZE THIS whenever ALGORITHMS, TRAJECTORIES or NUM_SEEDS changes: an array
 # that is too short does not fail, it runs the first 8*(last+1) tasks and stops,
 # leaving a campaign that looks finished and is missing whole cells. It was left
 # at 0-44 when NUM_SEEDS went 30 -> 50, which would have silently dropped 240
 # runs. Too long is harmless - the worker exits "nothing to do".
-#SBATCH --array=0-74
+#SBATCH --array=0-149
 #SBATCH --output=/capstor/scratch/cscs/lbonanni/logs/campaign_%A_%a.out
 
 # MCTS was listed twice here. Since the output file is data_<ALGO>_<seed>.csv,
@@ -26,7 +33,7 @@
 # already present and skipped - but it inflated the task count by 30 per scene.
 export ALGORITHMS="${ALGORITHMS:-MCTS VO-TREE VO-PLANNER}"
 export TRAJECTORIES="${TRAJECTORIES:-sinusoidal_complex intention_complex sinusoidal intention}"
-export NUM_SEEDS="${NUM_SEEDS:-50}"  # seeds per (algo, scene)
+export NUM_SEEDS="${NUM_SEEDS:-100}"  # seeds per (algo, scene)
 # ALGORITHMS/TRAJECTORIES/NUM_SEEDS honour the submitting environment, so a
 # single cell can be re-run without editing this file. Size --array to match:
 # ceil(N_ALGO * N_TRAJ * NUM_SEEDS / 8) - 1.
