@@ -44,19 +44,32 @@ SCENE="${TRAJ_ARR[$traj_idx]}"
 # scores as risk-free while being the most dangerous action available. That is
 # what produced 68-96% obstacle-initiated collisions in the 600-run campaign.
 #
-# The gamma sweep (0.02-0.65, 2 rs x 2 c x 2 scenes) gave, per scene:
-#   intention_complex   88-92% goal for every gamma where the obstacle covers
-#                       <= 71% of the margin, 6% at 0.43 (99%), 0% beyond.
-#                       Best cell 96% at gamma=0.30 rs=1.4 c=5.0, 0% volColl.
-#   sinusoidal_complex  monotonic, no cliff: 79/56/49/12/3/3/26 % over
-#                       0.10..0.65. Best cell 84% at gamma=0.10 rs=1.4 c=5.0.
+# The gamma sweep (0.02-0.65, 2 rs x 2 c x 2 scenes) found a plateau on each
+# scene, ending where the validity condition is violated:
+#
+#   gamma/s           0.02 0.04 0.07 0.10 0.15 0.20 0.30 0.43 0.55 0.65
+#   moves/margin       25%  29%  34%  39%  46%  54%  71%  99% 138% 190%
+#   intention_complex  88%  85%  86%  91%  88%  92%  88%   6%   0%   0%
+#   sinusoidal_complex 80%  83%  79%  78%  56%  49%  12%   3%   3%  26%
+#
+# intention tolerates up to 71% of the margin, sinusoidal only ~39% - four
+# obstacles rather than two means more simultaneous encounters. Both are flat
+# below their boundary, so gamma is chosen mid-plateau rather than at its best
+# cell: the per-cell maxima are selection artefacts, and the one we tested
+# out-of-sample confirmed it (84% at gamma=0.10 became 74% on fresh seeds, 79%
+# over 100). Expect roughly 80% on sinusoidal_complex and 88% on
+# intention_complex, not the 87% / 96% the best cells report.
+#
+# 0.04 rather than 0.10 for sinusoidal* because 0.10 is the last point before
+# the drop to 56%, and sitting on a boundary is how a scene change turns into a
+# collapse. 0.30 for intention* is likewise inside its plateau, not at the edge.
 #
 # The easy scenes were not swept. Their obstacles run at 0.1 m/s rather than
 # 0.2, so the same gamma leaves the model comfortably inside its validity
 # region - the risk there is a horizon that is shorter than it needs to be,
 # not one that is too long.
 case "$SCENE" in
-    sinusoidal*) RS=1.4; GAMMA=0.10; C=5.0;  MOV=0.25 ;;
+    sinusoidal*) RS=1.4; GAMMA=0.04; C=5.0;  MOV=0.25 ;;
     intention*)  RS=1.4; GAMMA=0.30; C=5.0;  MOV=0.25 ;;
     *) echo "no tuned parameters for scene '$SCENE'" >&2; exit 1 ;;
 esac
