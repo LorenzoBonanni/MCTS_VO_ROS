@@ -1,4 +1,5 @@
 import gc
+import math
 import os
 import pickle
 import random
@@ -243,25 +244,32 @@ MAX_SENSOR_AGE = (dt + THINK_MARGIN if cli_args.max_sensor_age is None
 GAMMA_S = cli_args.gamma_per_second
 DISCOUNT = GAMMA_S ** dt
 
-# Rollout depth. Deliberately a fixed 200 (HORIZON_S / dt) and NOT derived from
-# the discount, though deriving it is tempting: DISCOUNT**200 is 1e-28 at
-# gamma = 0.04/s, so on the face of it the last ~170 steps compute nothing.
+# Rollout depth, derived from the discount rather than fixed. A reward arriving
+# at step k is worth DISCOUNT**k, so simulating past the point where that falls
+# below TAIL_WEIGHT cannot change a decision.
 #
-# Two reasons it stays fixed. First, the tail is not negligible for TERMINAL
-# rewards. The per-step reward is -dist/max_eudist, in [-1, 0], but reaching the
-# goal is +100 and a collision -100. At gamma = 0.30/s (0.887/step) a goal found
-# at step 77 is still worth 0.0027 * 100 = 0.27, against a root Q-value spread
-# of about 0.06 - four times the signal the planner discriminates on. A cutoff
-# chosen against the per-step scale silently truncates events 100x larger.
+# TAIL_WEIGHT is sized against the TERMINAL rewards, not the per-step one. The
+# per-step reward is -dist/max_eudist, in [-1, 0], but reaching the goal is +100
+# and a collision -100, so a cutoff chosen on the per-step scale truncates
+# events a hundred times larger. Root Q-values span only about 0.06, so the
+# residual has to stay well under that: 1e-6 leaves at most 1e-4 of a terminal
+# reward beyond the horizon, a thousandth of the spread the planner
+# discriminates on. (An earlier version used 1e-4 here, which left 0.01 - a
+# sixth of the spread, and at gamma = 0.30/s truncated goals worth 0.27.)
 #
-# Second, the saving is not worth the cost of invalidating comparisons: a
-# 200-step fused_rollout is ~11 us against ~277 us per simulation, i.e. ~4% of
-# planning time, while every sweep and campaign to date ran at 200. Changing it
-# would mean none of those results transfer.
+# DEPTH was a fixed 200 for years, which is what this asks for at gamma = 0.65/s
+# once the HORIZON_S cap is applied - so the constant was silently tracking a
+# discount nobody had chosen deliberately, and stayed put when the discount
+# moved. At 0.04/s (0.725/step) 43 steps carry the same weight and
+# DISCOUNT**200 is 1e-28.
 #
-# If it is ever revisited, size the tail against the terminal rewards
-# (TAIL_WEIGHT / 100) and A/B it against a fixed 200 on a full cell.
-DEPTH = int(round(HORIZON_S / dt))
+# The saving is small - a 200-step fused_rollout is ~11 us against ~277 us per
+# simulation - so the point is not computing meaningless numbers, not speed.
+# Results measured at the old fixed 200 are not directly comparable: quote the
+# `depth` column, which is in every CSV, when comparing across runs.
+TAIL_WEIGHT = 1e-6
+DEPTH = min(int(math.ceil(math.log(TAIL_WEIGHT) / math.log(DISCOUNT))),
+            int(round(HORIZON_S / dt)))
 
 # Environment executable and output directory for the selected trajectories
 env_build = cli_args.env_build or ENV_BUILDS[trajectories]
