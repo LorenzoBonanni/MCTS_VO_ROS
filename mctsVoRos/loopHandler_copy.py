@@ -291,7 +291,8 @@ DISCOUNT = GAMMA_S ** dt
 # matched, and a whole campaign skipped itself in seconds.
 #   1: everything up to and including the 2400-run campaign (fixed DEPTH = 200)
 #   2: DEPTH derived from the discount
-PARAM_EPOCH = 2
+#   3: planner node allocation, ~50-65% more simulations in the same budget
+PARAM_EPOCH = 3
 
 TAIL_WEIGHT = 1e-6
 DEPTH = min(int(math.ceil(math.log(TAIL_WEIGHT) / math.log(DISCOUNT))),
