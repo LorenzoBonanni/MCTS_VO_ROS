@@ -18,6 +18,7 @@ from debug_utils import debug_plots_and_animations
 from MCTS_VO.bettergym.agents.planner_mcts import Mcts, RolloutStateNode
 from MCTS_VO.bettergym.agents.utils.utils import epsilon_uniform_uniform
 from MCTS_VO.bettergym.compiled_utils import dist_to_goal, get_points_from_lidar
+from MCTS_VO.bettergym.environments.env import set_range_size_metric
 from MCTS_VO.environment_creator import create_pedestrian_env
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
@@ -78,6 +79,18 @@ parser.add_argument('--vo-geometry', default='paper', type=str,
                          'and including the 180-run campaign, which took '
                          'tangents to r0 + r1 and ignored beyond 1.6*(r0 + r1); '
                          'pass it to A/B the correction on identical scenes.')
+parser.add_argument('--range-metric', default='norm', type=str,
+                    choices=['norm', 'width'],
+                    help='How get_discrete_space measures an angle range when '
+                         'splitting a fixed number of samples across several of '
+                         'them. "norm" is sqrt(lo^2 + hi^2), which is what every '
+                         'result up to the 2400-run campaign used; it tracks how '
+                         'far the range sits from zero rather than how wide it '
+                         'is, so [3.0,3.2] and [-0.1,0.1] score 4.38 and 0.14 '
+                         'for the same width. "width" is hi - lo, what the '
+                         'proportional split is meant to be. Only differs when '
+                         'there is more than one range, i.e. when the reachable '
+                         'span crosses +-pi.')
 parser.add_argument('--max-obs-radius', default=0.5, type=float,
                     help='Largest RANSAC-fitted obstacle radius accepted, in '
                          'metres. Applied to the *measured* radius, before '
@@ -230,6 +243,8 @@ LEGACY_VO = cli_args.vo_geometry == 'legacy'
 # Applied at import time, i.e. before any environment or planner is built, so
 # that no code path can observe the default first.
 set_legacy_vo(LEGACY_VO)
+RANGE_METRIC = cli_args.range_metric
+set_range_size_metric(RANGE_METRIC == 'width')
 ROLLOUT_COLLISION_CHECK = cli_args.rollout_collision == 'check'
 collect_trajectories = cli_args.collect_trajectories
 DIAG = cli_args.diag
@@ -1287,6 +1302,7 @@ def save_data(loopHandler, exp_num):
         "horizonS": HORIZON_S,
         "depth": DEPTH,
         "paramEpoch": PARAM_EPOCH,
+        "rangeMetric": RANGE_METRIC,
         "radiusScale": RADIUS_SCALE,
         "maxObsRadius": MAX_OBS_RADIUS,
         "voGeometry": cli_args.vo_geometry,

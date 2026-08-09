@@ -112,7 +112,7 @@ if [[ -z "$PARAM_EPOCH" ]]; then
 fi
 
 params_match() {
-    awk -F, -v want="$RS|$GAMMA|$C|$MOV|${MAX_OBS_RADIUS:-0.5}|${VO_GEOMETRY:-paper}|$PARAM_EPOCH" '
+    awk -F, -v want="$RS|$GAMMA|$C|$MOV|${MAX_OBS_RADIUS:-0.5}|${VO_GEOMETRY:-paper}|$PARAM_EPOCH|${RANGE_METRIC:-norm}" '
         NR == 1 { for (i = 1; i <= NF; i++) h[$i] = i; next }
         NR == 2 {
             split(want, w, "|")
@@ -126,6 +126,7 @@ params_match() {
             # Runs predating the stamp have no epoch column and are therefore
             # from epoch 1 or earlier: never reusable once it has been bumped.
             if (!("paramEpoch" in h) || ($h["paramEpoch"] + 0) != (w[7] + 0)) exit 1
+            if (!("rangeMetric" in h) || $h["rangeMetric"] != w[8]) exit 1
             exit 0
         }
         END { if (NR < 2) exit 1 }   # header only, or empty
@@ -223,6 +224,7 @@ for attempt in 1 2; do
         --max-obs-vel "$MOV" \
         --max-obs-radius "${MAX_OBS_RADIUS:-0.5}" \
         --vo-geometry "${VO_GEOMETRY:-paper}" \
+        --range-metric "${RANGE_METRIC:-norm}" \
         >> "$LOG" 2>&1
     rc=$?
     set -e

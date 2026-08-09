@@ -45,6 +45,12 @@ export NUM_SEEDS="${NUM_SEEDS:-200}"  # seeds per (algo, scene)
 # single value across the whole campaign, e.g. for an ablation.
 export MAX_OBS_RADIUS=0.5
 export VO_GEOMETRY=paper
+# A/B for F2. "norm" reproduces the 2400-run campaign; "width" is the corrected
+# proportional split in get_discrete_space. Only differs when the reachable
+# heading span crosses +-pi and therefore arrives as two ranges. The epoch and
+# this value are both in the CSV and both checked before a run is reused, so
+# the two arms cannot be mixed.
+export RANGE_METRIC="${RANGE_METRIC:-norm}"
 export ROLLOUT_COLLISION="check"
 
 export SWEEP_DIR="${SWEEP_DIR:-/root/sweep}"
