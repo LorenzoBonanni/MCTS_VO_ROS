@@ -9,32 +9,37 @@
 #SBATCH --partition=normal
 #SBATCH --job-name=mctsvo-sweep
 #SBATCH --time=06:00:00
-# GAMMA EXTENSION, ROUND 2: below 0.30, with 0.30 as control.
-# 2 rs * 4 gamma * 2 c * 2 scenes * 1 mov * 1 vo = 32 cells, 50 seeds each.
+# GAMMA EXTENSION, ROUND 3: below 0.10, with 0.10 as control.
+# 2 rs * 4 gamma * 2 c * 2 scenes * 1 mov * 1 vo = 32 cells, 100 seeds each.
 #
-# Round 1 swept 0.30/0.43/0.55/0.65 to test whether the discount horizon is too
-# long for the frozen-obstacle model (the search holds obstacles at their
-# observed position, paper 4.2.1, so the model is only usable while they have
-# not moved far; effective horizon is dt/(1 - gamma^dt)). The predicted optimum
-# was 0.43, from setting v_obs * horizon equal to the 0.25 m at which robot
-# (r=0.15) and obstacle (r=0.10) touch. That prediction was WRONG - there is no
-# peak at 0.43 - but the axis matters enormously and scene-specifically:
+# Rounds 1-2 swept 0.10 through 0.65. The result: VO-TREE beats VO-PLANNER on
+# both complex scenes once the horizon is short enough, with 0% voluntary
+# collisions throughout.
 #
-#   intention_complex   goal 0% at 0.65 -> 90% at 0.30 (100% at rs=1.4 c=5.0,
-#                       with 0% collisions of any kind, against VO-PLANNER's
-#                       76%). A cliff between 0.43 and 0.30, not a peak.
-#   sinusoidal_complex  best at 0.65 (36%), worst in the middle. Lowering gamma
-#                       does not help here at all; still 64-96% obsColl.
+#   intention_complex   96% at gamma=0.30 rs=1.4 c=5.0 (VO-PLANNER 76%)
+#   sinusoidal_complex  84% at gamma=0.10 rs=1.4 c=5.0 (VO-PLANNER 66%)
 #
-# sims stayed at 266-285 across the whole axis, so none of that is extra search.
+# The mechanism is the frozen-obstacle model (paper 4.2.1): the search holds
+# obstacles where they were observed, so it stays usable only while they have
+# not moved far. Effective horizon is dt/(1 - gamma^dt), and the condition is
+# v_closing * horizon < r_R + r_i = 0.15 + 0.10 = 0.25 m. That inequality does
+# not predict an optimum, it predicts a BREAKING POINT, and intention_complex
+# lands on it: 88-92% goal for every gamma where the obstacle covers <= 71% of
+# the margin, then 6% at gamma=0.43 where it covers 99%, then 0% beyond.
 #
-# This round does two things. It extends below the grid edge, since
-# intention_complex was still improving at 0.30 and sinusoidal_complex may have
-# a second regime lower down. And it raises NUM_EXP to 50, which tops the
-# existing 0.30 cells up from 25 - seeds 25-49 are then a genuine out-of-sample
-# check on the 100% cell, which as the maximum of 16 cells at n=25 is
-# selection-biased upward (CI 87-100%). Analyse those seeds separately before
-# believing the number.
+#   gamma/s   0.10  0.15  0.20  0.30  0.43  0.55  0.65
+#   horizon    4.9   5.8   6.7   8.8  12.4  17.2  23.7  steps
+#   moves/margin 39%  46%   54%   71%   99%  138%  190%
+#   intention  90%   88%   92%   88%    6%    0%    0%
+#   sinusoidal 79%   56%   49%   12%    3%    3%   26%
+#
+# sinusoidal_complex degrades monotonically rather than falling off a cliff, and
+# was still improving at 0.10 - hence this round. Two purposes: find where it
+# stops improving (as the horizon approaches one step VO-TREE degenerates into
+# VO-PLANNER, so the point where the curve flattens says whether lookahead
+# contributes anything at all), and top the 0.10 cells from 50 to 100 seeds so
+# that seeds 50-99 are an out-of-sample check on the 84%, which is the maximum
+# of 4 cells and therefore biased upward. Analyse those seeds separately.
 #
 # rs and c both take the two per-scene tuned values, since the sweep applies one
 # setting to both scenes and they disagree (sin: rs=1.4 c=5.0, int: rs=1.6 c=2.0).
@@ -58,7 +63,7 @@ export ALGORITHM="VO-TREE"        # Change to MCTS or VO-PLANNER as needed
 # ignore this export, which read "sinusoidal intention" - the easy scenes.
 export TRAJECTORIES="sinusoidal_complex intention_complex"
 export RS_VALS="1.4 1.6"
-export GAMMA_VALS="0.10 0.15 0.20 0.30"
+export GAMMA_VALS="0.02 0.04 0.07 0.10"
 export C_VALS="2.0 5.0"
 # "paper" is Algorithm 4 as written: tangents to r1, ignore beyond r0 + r1,
 # trapped below r1. The comparison against "legacy" (tangents to r0 + r1,
@@ -66,10 +71,10 @@ export C_VALS="2.0 5.0"
 # x 50 seeds, paper gave 0% voluntary collisions in every cell against legacy's
 # 2-4%, with goal rate unchanged. Add "legacy" back to re-run that comparison.
 export VO_GEOMETRIES="paper"
-# 50, not 25: the 0.30 cells already hold seeds 0-24 from round 1 and the
-# worker skips runs whose CSV exists, so this adds seeds 25-49 to them and runs
-# all 50 for the new gamma values. Those extra 25 are the out-of-sample check.
-export NUM_EXP=50                 # independent seeds per combination
+# 100: the 0.10 cells already hold seeds 0-49 and the worker skips runs whose
+# CSV exists, so this adds seeds 50-99 to them and runs all 100 for the new
+# gamma values. Those extra 50 are the out-of-sample check on the 84% cell.
+export NUM_EXP=100                # independent seeds per combination
 # Swept axis. Must be >= the fastest obstacle in the scene or the VO safety
 # guarantee does not hold. The .unity files override the move_*.cs defaults:
 # max_speed/maxSpeed are 0.2 on the fastest instances in both complex scenes,
