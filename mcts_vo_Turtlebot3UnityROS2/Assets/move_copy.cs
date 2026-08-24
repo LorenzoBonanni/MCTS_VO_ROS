@@ -13,6 +13,19 @@ public class move_copy : MonoBehaviour
     public int multiplier = 1;
     public float maxSpeed = 0.15f;
 
+    // Lower bound of the forward-speed draw. Was hardcoded to 0, so the forward
+    // speed averaged half of maxSpeed and varied per redraw: this obstacle
+    // advanced roughly half as far as move_4_copy for the same settings, and by
+    // an amount that depended on the RNG. Set it equal to maxSpeed for a
+    // constant forward speed.
+    public float minSpeed = 0f;
+
+    // First index of the recorded leg; the leg is 240*multiplier - startIdx
+    // steps long. Was a hardcoded 180, which left multiplier as the only lever
+    // and made the leg jump 60 -> 300 -> 540 steps. Lower it to lengthen the
+    // outward run without changing anything else.
+    public int startIdx = 180;
+
     // Speed measurement, from the realised displacement: (p_t+1 - p_t) / dt.
     // move_1 and move_2 already expose these; move_copy/move_4_copy did not, so
     // the two obstacles that actually run in SIN_EASY could not be measured at
@@ -53,7 +66,6 @@ public class move_copy : MonoBehaviour
         //    Recording starts at idx = 240 - 60 = 180 and continues until
         //    idx reaches 240 * multiplier. The step at each idx uses that
         //    idx for the sine and then increments idx.
-        int startIdx = 180;
         int endIdx = 240 * multiplier;   // exclusive (stop before this)
         int currentIdx = startIdx;
         int speedStepCount = 0;
@@ -65,7 +77,7 @@ public class move_copy : MonoBehaviour
             // Redraw speed every 100 steps (matches original)
             if (speedStepCount % 100 == 0)
             {
-                forwardSpeed = mulForwardSpeed * Random.Range(0.0f, maxSpeed);
+                forwardSpeed = mulForwardSpeed * Random.Range(minSpeed, maxSpeed);
             }
             speedStepCount++;
 

@@ -13,6 +13,12 @@ public class move_4_copy : MonoBehaviour
     public int multiplier = 1;
     public float maxSpeed = 0.15f;
 
+    // Lower bound of the forward-speed draw. Was hardcoded to 0.05, so setting
+    // maxSpeed below that inverted the range and Unity drew in [maxSpeed, 0.05]
+    // instead - the field silently stopped bounding anything, and the realised
+    // speed exceeded the intended limit.
+    public float minSpeed = 0.05f;
+
     // Speed measurement, from the realised displacement: (p_t+1 - p_t) / dt.
     // move_1 and move_2 already expose these; move_copy/move_4_copy did not, so
     // the two obstacles that actually run in SIN_EASY could not be measured at
@@ -82,7 +88,7 @@ public class move_4_copy : MonoBehaviour
         // 1. Randomize speed every 100 steps (exactly as original)
         if (speedStepCount % 100 == 0)
         {
-            forwardSpeed = mulForwardSpeed * Random.Range(0.05f, maxSpeed);
+            forwardSpeed = mulForwardSpeed * Random.Range(minSpeed, maxSpeed);
         }
         speedStepCount++;
 
