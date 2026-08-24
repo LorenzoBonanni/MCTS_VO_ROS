@@ -32,31 +32,42 @@ algo_idx=$(( IDX / N_TRAJ ))
 ALGO="${ALGO_ARR[$algo_idx]}"
 SCENE="${TRAJ_ARR[$traj_idx]}"
 
-# Per-scene parameters, from the gamma sweeps. gamma dominates everything else.
+# Per-scene parameters. The search freezes obstacles at their observed position
+# for the whole rollout (paper 4.2.1), so the tuning is really about how far out
+# that fiction is still trusted - which is what gamma sets, through
+# horizon = dt/(1 - gamma^dt) and the derived DEPTH.
 #
-# The search freezes obstacles (paper 4.2.1), so it is only usable while they
-# have not moved far: horizon = dt/(1 - gamma^dt), and it must satisfy
-# v_closing * horizon < r_robot + r_obs = 0.25 m. Take the LONGEST horizon that
-# still fits. Faster obstacles therefore want a smaller gamma, and all four
-# scenes collapse once the obstacle covers ~100% of the margin.
+# From the 358,400-run sweep over gamma x c x rs x mov, VO-TREE, 200 seeds per
+# cell. Each value is picked from the axis marginal at the scene's chosen gamma
+# - 2400 to 3200 runs per point - and not from the best single cell: neighbouring
+# cells differ by up to 10 points, more than any axis marginal, so the top of a
+# 512-cell ranking is mostly the winner's curse.
 #
-# Four cases, not two globs: sinusoidal* and intention* used to share a value,
-# which is how the easy scenes inherited the complex tuning and fell to 91% and
-# 16% goal in the 2400-run campaign.
-# MOV must be >= the fastest obstacle in the scene or the VO guarantee fails.
-# True maxima are 0.1 m/s on the easy scenes and 0.2 on the _complex ones, so
-# 0.15 is the tightest value the easy ones admit with margin. The sweep put
-# 0.125, 0.15 and 0.25 within a few points of each other there, so this is
-# chosen for being physically right rather than for a measured gain.
+# gamma is the only axis with a large effect (goal 0-95% across its range). It is
+# also not unimodal: on the easy scenes there is an isolated band of obsColl
+# around an effective horizon of 1.1-1.5 s (intention 0.40, sinusoidal 0.40-0.50)
+# with good values on both sides of it. Do not tune into that band.
+#
+# c is flat everywhere except sinusoidal, which wants >= 2.0; 5.0 is best there
+# and costs at most 2.5 points elsewhere, so one value covers all four scenes.
+#
+# rs is the second largest effect and it points in opposite directions: 1.8 is
+# worth +11 points on intention and -5 on intention_complex. Hence per-scene.
+#
+# MOV is the obstacle speed the planner assumes, and it must be >= the true one
+# or the VO guarantee fails. True maxima are 0.1 m/s easy and 0.2 complex, and
+# the VO ball already spans a full control cycle (THINK_MARGIN = dt, so
+# dt + think_margin = 0.2 s = the measured cycle), so there is no timing factor
+# to recover. These are the true maxima + 25%, a margin for the fact that
+# obstacle velocity is never measured - only bounded - while positions come from
+# a RANSAC fit. Higher values score better on intention (0.25 is worth +6) but
+# 2.5x the real speed is a hedge against the frozen-obstacle model, not a
+# property of the scene, and reads as exactly that.
 case "$SCENE" in
-    sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.15 ;;
-    sinusoidal_complex)  RS=1.4; GAMMA=0.04; C=5.0;  MOV=0.25 ;;
-    # 0.50 gave 32% goal with 67% obsColl: budget 200, so rollouts trusted the
-    # frozen obstacles 17.5 s out and stopping looked optimal. Lower gamma is
-    # monotonically better over the range measured - 0.40/0.30/0.20 gave
-    # 14-24 / 36-56 / 62-78% - and 0.20 is the best value actually tested.
-    intention)           RS=1.4; GAMMA=0.20; C=5.0;  MOV=0.15 ;;
-    intention_complex)   RS=1.4; GAMMA=0.30; C=5.0;  MOV=0.25 ;;
+    sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.125 ;;
+    sinusoidal_complex)  RS=1.2; GAMMA=0.04; C=5.0;  MOV=0.25  ;;
+    intention)           RS=1.8; GAMMA=0.03; C=5.0;  MOV=0.125 ;;
+    intention_complex)   RS=1.2; GAMMA=0.30; C=5.0;  MOV=0.25  ;;
     *) echo "no tuned parameters for scene '$SCENE'" >&2; exit 1 ;;
 esac
 # Overridable, but the defaults above are the tuned ones.
