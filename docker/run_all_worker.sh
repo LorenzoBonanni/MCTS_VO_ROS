@@ -55,17 +55,33 @@ SCENE="${TRAJ_ARR[$traj_idx]}"
 # worth +11 points on intention and -5 on intention_complex. Hence per-scene.
 #
 # MOV is the obstacle speed the planner assumes, and it must be >= the true one
-# or the VO guarantee fails. True maxima are 0.1 m/s easy and 0.2 complex, and
-# the VO ball already spans a full control cycle (THINK_MARGIN = dt, so
-# dt + think_margin = 0.2 s = the measured cycle), so there is no timing factor
-# to recover. These are the true maxima + 25%, a margin for the fact that
-# obstacle velocity is never measured - only bounded - while positions come from
-# a RANSAC fit. Higher values score better on intention (0.25 is worth +6) but
-# 2.5x the real speed is a hedge against the frozen-obstacle model, not a
-# property of the scene, and reads as exactly that.
+# or the VO guarantee fails. The VO ball already spans a full control cycle
+# (THINK_MARGIN = dt, so dt + think_margin = 0.2 s = the measured cycle), so
+# nothing has to be recovered through MOV and the only margin needed covers the
+# fact that obstacle velocity is assumed rather than measured.
+#
+# The true maxima are NOT the maxSpeed fields of the Unity scripts. Read off
+# Assets/move_*.cs together with the serialised values in Scenes/*.unity:
+#
+#   INT_*   move_copy_int / move_4_copy_int, plus move_1 / move_2 on COMPLEX.
+#           Every step is velocity * dt * (sin a, cos a), a unit direction, so
+#           the speed is exactly the configured one: 0.1 easy, 0.2 complex.
+#   SIN_*   move_copy / move_4_copy step by (forwardSpeed * dt, dSin) where
+#           dSin = amplitude * (sin(i f dt) - sin((i-1) f dt)). amplitude is the
+#           amplitude of a sine whose DERIVATIVE is the lateral velocity, so with
+#           amplitude 0.2, frequency 1 and dt 0.1 it contributes 0.200 m/s on its
+#           own, on top of forwardSpeed and independent of maxSpeed. The real
+#           maxima are hypot(0.10, 0.200) = 0.224 easy and hypot(0.15, 0.200)
+#           = 0.250 complex, not 0.1 and 0.2.
+#
+# Hence 0.125 / 0.25 on the intention scenes (true + 25%) but 0.25 / 0.35 on the
+# sinusoidal ones. 0.125 there would be 56% of what the guarantee requires, and
+# 0.25 on sinusoidal_complex would leave exactly zero margin. The sweep agrees:
+# volColl falls 0.4 -> 0.1 on sinusoidal as MOV rises, and 1.4 -> 0.9 on
+# sinusoidal_complex between 0.20 and 0.25, while goal% moves by under a point.
 case "$SCENE" in
-    sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.125 ;;
-    sinusoidal_complex)  RS=1.2; GAMMA=0.04; C=5.0;  MOV=0.25  ;;
+    sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.25  ;;
+    sinusoidal_complex)  RS=1.2; GAMMA=0.04; C=5.0;  MOV=0.35  ;;
     intention)           RS=1.8; GAMMA=0.03; C=5.0;  MOV=0.125 ;;
     intention_complex)   RS=1.2; GAMMA=0.30; C=5.0;  MOV=0.25  ;;
     *) echo "no tuned parameters for scene '$SCENE'" >&2; exit 1 ;;
