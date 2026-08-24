@@ -19,6 +19,16 @@ public class move_4_copy : MonoBehaviour
     // speed exceeded the intended limit.
     public float minSpeed = 0.05f;
 
+    // Direction of travel, in degrees, measured from +x towards +z. The step is
+    // built as (forward, lateral) and then rotated by this angle, so the whole
+    // motion turns together and the speed magnitude is unchanged - the bound
+    // hypot(maxSpeed, amplitude*frequency) still holds at any angle.
+    // 0 = advance along +x (the previous hardcoded behaviour), 180 = along -x,
+    // 90 = along +z. transform.position is written in world coordinates, so
+    // rotating the GameObject in the Inspector has no effect; this is the only
+    // way to reorient the path.
+    public float directionDeg = 0f;
+
     // Speed measurement, from the realised displacement: (p_t+1 - p_t) / dt.
     // move_1 and move_2 already expose these; move_copy/move_4_copy did not, so
     // the two obstacles that actually run in SIN_EASY could not be measured at
@@ -45,6 +55,15 @@ public class move_4_copy : MonoBehaviour
 
     // Accumulator for fixed‑time stepping
     private float accumulator = 0f;
+
+
+    private Vector3 RotateStep(float forward, float lateral)
+    {
+        float a = directionDeg * Mathf.Deg2Rad;
+        float c = Mathf.Cos(a);
+        float s = Mathf.Sin(a);
+        return new Vector3(forward * c - lateral * s, 0f, forward * s + lateral * c);
+    }
 
     void Start()
     {
@@ -99,8 +118,8 @@ public class move_4_copy : MonoBehaviour
 
         // 3. Move in X (forward) and update Z by the delta of the sine
         Vector3 previousPosition = currentPosition;
-        currentPosition.x += forwardSpeed * simulationDt;
-        currentPosition.z += currentOffset - previousOffset;
+        currentPosition += RotateStep(forwardSpeed * simulationDt,
+                                      currentOffset - previousOffset);
         Vector3 s = currentPosition - previousPosition;
 
         // 4. Update transform directly – no interpolation
