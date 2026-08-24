@@ -13,6 +13,22 @@ public class move_copy : MonoBehaviour
     public int multiplier = 1;
     public float maxSpeed = 0.15f;
 
+    // Speed measurement, from the realised displacement: (p_t+1 - p_t) / dt.
+    // move_1 and move_2 already expose these; move_copy/move_4_copy did not, so
+    // the two obstacles that actually run in SIN_EASY could not be measured at
+    // all and maxSpeed was mistaken for their speed. It is not: maxSpeed bounds
+    // only the forward component, while the lateral term is the derivative of
+    // amplitude*sin(i*frequency*dt) and contributes amplitude*frequency m/s on
+    // its own.
+    public Vector3 currentVelocity { get; private set; }
+    public float currentSpeed { get; private set; }
+    public float maxSpeedSeen { get; private set; }
+    private int loggedSteps = 0;
+
+    [Header("Debug Logging")]
+    public bool enableLogging = true;
+    public int logInterval = 10;
+
     // State for replay
     private List<Vector3> steps = new List<Vector3>();
     private int phase = 0;              // 0 .. 2n-1 (out then back)
@@ -102,10 +118,26 @@ public class move_copy : MonoBehaviour
         Vector3 s = phase < n ? steps[phase] : -steps[2 * n - 1 - phase];
 
         // Move
+        Vector3 previousPosition = currentPosition;
         currentPosition += s;
         transform.position = currentPosition;
 
         // Advance phase and wrap around for continuous cycling
         phase = (phase + 1) % (2 * n);
+
+        // ---- speed from the realised displacement ----
+        currentVelocity = (currentPosition - previousPosition) / simulationDt;
+        currentSpeed = currentVelocity.magnitude;
+        if (currentSpeed > maxSpeedSeen)
+            maxSpeedSeen = currentSpeed;
+
+        loggedSteps++;
+        if (enableLogging && loggedSteps % logInterval == 0)
+        {
+            Debug.Log($"{GetType().Name} step {loggedSteps} | " +
+                      $"Speed: {currentSpeed:F4} m/s | Max so far: {maxSpeedSeen:F4} m/s | " +
+                      $"Step: ({s.x:F4}, {s.z:F4}) | " +
+                      $"Position: ({currentPosition.x:F4}, {currentPosition.z:F4})");
+        }
     }
 }

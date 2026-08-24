@@ -13,6 +13,22 @@ public class move_4_copy : MonoBehaviour
     public int multiplier = 1;
     public float maxSpeed = 0.15f;
 
+    // Speed measurement, from the realised displacement: (p_t+1 - p_t) / dt.
+    // move_1 and move_2 already expose these; move_copy/move_4_copy did not, so
+    // the two obstacles that actually run in SIN_EASY could not be measured at
+    // all and maxSpeed was mistaken for their speed. It is not: maxSpeed bounds
+    // only the forward component, while the lateral term is the derivative of
+    // amplitude*sin(i*frequency*dt) and contributes amplitude*frequency m/s on
+    // its own.
+    public Vector3 currentVelocity { get; private set; }
+    public float currentSpeed { get; private set; }
+    public float maxSpeedSeen { get; private set; }
+    private int loggedSteps = 0;
+
+    [Header("Debug Logging")]
+    public bool enableLogging = true;
+    public int logInterval = 10;
+
     // State variables
     private int idx = 0;
     private int speedStepCount = 0;      // counts every step, never reset
@@ -76,11 +92,29 @@ public class move_4_copy : MonoBehaviour
         float currentOffset  = Mathf.Sin(idx * frequency * simulationDt) * amplitude;
 
         // 3. Move in X (forward) and update Z by the delta of the sine
+        Vector3 previousPosition = currentPosition;
         currentPosition.x += forwardSpeed * simulationDt;
         currentPosition.z += currentOffset - previousOffset;
+        Vector3 s = currentPosition - previousPosition;
 
         // 4. Update transform directly – no interpolation
         transform.position = currentPosition;
+
+        // ---- speed from the realised displacement ----
+        currentVelocity = (currentPosition - previousPosition) / simulationDt;
+        currentSpeed = currentVelocity.magnitude;
+        if (currentSpeed > maxSpeedSeen)
+            maxSpeedSeen = currentSpeed;
+
+        loggedSteps++;
+        if (enableLogging && loggedSteps % logInterval == 0)
+        {
+            Debug.Log($"{GetType().Name} step {loggedSteps} | " +
+                      $"Speed: {currentSpeed:F4} m/s | Max so far: {maxSpeedSeen:F4} m/s | " +
+                      $"Step: ({s.x:F4}, {s.z:F4}) | " +
+                      $"Position: ({currentPosition.x:F4}, {currentPosition.z:F4})");
+        }
+
 
         // 5. Increment index
         idx++;
