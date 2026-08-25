@@ -42,6 +42,11 @@ export ROLLOUT_COLLISION="check"
 # the job (~/.edf/mctsvo.toml). An inherited host path once cost a 9600-run
 # sweep - the container created it in its writable layer and discarded it.
 export SWEEP_DIR=/root/sweep
+# The EDF binds $OUTPUT_SCRATCH/sweep here. pyxis cannot mount a source that
+# does not exist: it fails before the container starts, so every task dies in
+# ~1s with no log of its own. Deleting the tree to reclaim Lustre inodes is a
+# normal thing to do between sweeps, so recreate it rather than rely on it.
+mkdir -p "$OUTPUT_SCRATCH/sweep"
 export MCTSVO_REPO="${MCTSVO_REPO:-/workspace/MCTS_VO_ROS}"
 
 srun --environment=mctsvo "$MCTSVO_REPO/docker/sweep_worker.sh"

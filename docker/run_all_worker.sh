@@ -43,6 +43,14 @@ SCENE="${TRAJ_ARR[$traj_idx]}"
 # cells differ by up to 10 points, more than any axis marginal, so the top of a
 # 512-cell ranking is mostly the winner's curse.
 #
+# PROVENANCE, and it is mixed. GAMMA comes from a 6400-run sweep (8 values x 4
+# scenes x 200 seeds) run on the ef9eb8f scenes. All four scenes were then
+# redesigned in 40b4070/583611d - new obstacle paths on SIN_*, a wider window on
+# INT_COMPLEX's Obstacle_8, and halved move_1/move_2 timing constants that touch
+# every scene - so these gammas are STALE until the sweep is repeated. RS and C
+# are older still: the 358,400-run values, chosen on scenes whose obstacles moved
+# at 0.224 / 0.250. Treat all of it as inherited defaults, not as tuned.
+#
 # gamma is the only axis with a large effect (goal 0-95% across its range). It is
 # also not unimodal: on the easy scenes there is an isolated band of obsColl
 # around an effective horizon of 1.1-1.5 s (intention 0.40, sinusoidal 0.40-0.50)
@@ -65,24 +73,23 @@ SCENE="${TRAJ_ARR[$traj_idx]}"
 #
 #   INT_*   move_copy_int / move_4_copy_int, plus move_1 / move_2 on COMPLEX.
 #           Every step is velocity * dt * (sin a, cos a), a unit direction, so
-#           the speed is exactly the configured one: 0.1 easy, 0.2 complex.
+#           the speed is exactly the configured one.
 #   SIN_*   move_copy / move_4_copy step by (forwardSpeed * dt, dSin) where
 #           dSin = amplitude * (sin(i f dt) - sin((i-1) f dt)). amplitude is the
-#           amplitude of a sine whose DERIVATIVE is the lateral velocity, so with
-#           amplitude 0.2, frequency 1 and dt 0.1 it contributes 0.200 m/s on its
-#           own, on top of forwardSpeed and independent of maxSpeed. The real
-#           maxima are hypot(0.10, 0.200) = 0.224 easy and hypot(0.15, 0.200)
-#           = 0.250 complex, not 0.1 and 0.2.
+#           amplitude of a sine whose DERIVATIVE is the lateral velocity, so it
+#           contributes amplitude * frequency m/s on its own, on top of
+#           forwardSpeed and independent of maxSpeed. That coupling is what made
+#           the pre-ef9eb8f scenes run at 0.224 / 0.250 instead of 0.1 / 0.2.
 #
-# Hence 0.125 / 0.25 on the intention scenes (true + 25%) but 0.25 / 0.35 on the
-# sinusoidal ones. 0.125 there would be 56% of what the guarantee requires, and
-# 0.25 on sinusoidal_complex would leave exactly zero margin. The sweep agrees:
-# volColl falls 0.4 -> 0.1 on sinusoidal as MOV rises, and 1.4 -> 0.9 on
-# sinusoidal_complex between 0.20 and 0.25, while goal% moves by under a point.
+# ef9eb8f retuned amplitude and frequency so the realised maxima are 0.1 on the
+# easy scenes and 0.2 on the complex ones, confirmed by the currentSpeed log the
+# movers now print. So MOV is simply true + 25% everywhere: 0.125 easy, 0.25
+# complex. The pre-fix asymmetry (0.25 / 0.35 on the sinusoidal scenes) existed
+# only to cover the 0.224 / 0.250 and is gone with it.
 case "$SCENE" in
-    sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.25  ;;
-    sinusoidal_complex)  RS=1.2; GAMMA=0.04; C=5.0;  MOV=0.35  ;;
-    intention)           RS=1.8; GAMMA=0.03; C=5.0;  MOV=0.125 ;;
+    sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.125 ;;
+    sinusoidal_complex)  RS=1.2; GAMMA=0.10; C=5.0;  MOV=0.25  ;;
+    intention)           RS=1.8; GAMMA=0.06; C=5.0;  MOV=0.125 ;;
     intention_complex)   RS=1.2; GAMMA=0.30; C=5.0;  MOV=0.25  ;;
     *) echo "no tuned parameters for scene '$SCENE'" >&2; exit 1 ;;
 esac
