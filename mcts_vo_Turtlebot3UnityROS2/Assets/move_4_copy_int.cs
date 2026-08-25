@@ -31,6 +31,8 @@ public class move_4_copy_int : MonoBehaviour
     public bool enableLogging = true;          // enable/disable console logging
     public int logInterval = 10;               // log every N steps (e.g., 10)
     private int logCounter = 0;                // counts steps for logging
+    public bool enableCsvLogging = false;
+    private float maxSpeedSeen = 0f;
 
     void Start()
     {
@@ -99,9 +101,14 @@ public class move_4_copy_int : MonoBehaviour
         // 6. Compute velocity and speed from the step
         currentVelocity = step / simulationDt;   // units per second
         currentSpeed = currentVelocity.magnitude;
+        if (currentSpeed > maxSpeedSeen)
+            maxSpeedSeen = currentSpeed;
 
         // 7. Increment step index
         idx++;
+
+        ObstacleCsvLogger.LogRow(enableCsvLogging, gameObject.name, idx, idx * simulationDt,
+                                  currentPosition.x, currentPosition.z, currentSpeed, maxSpeedSeen);
 
         // 8. Debug logging at configured interval
         if (enableLogging && idx % logInterval == 0)

@@ -12,8 +12,8 @@ public class move_2 : MonoBehaviour
     // into its bounded back-and-forth. Halved values finish recording by
     // ~9.9 s, well inside one episode.
     private int angleSwitchIdx = 25;
-    private int minIdx = 25;
-    private int maxIdx = 40;
+    [SerializeField] private int minIdx = 25;
+    [SerializeField] private int maxIdx = 40;
     public float max_speed = 0.15f;
 
     private int idx = 0;
