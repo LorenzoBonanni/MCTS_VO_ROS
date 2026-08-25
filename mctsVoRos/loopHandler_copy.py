@@ -292,7 +292,11 @@ DISCOUNT = GAMMA_S ** dt
 #   1: everything up to and including the 2400-run campaign (fixed DEPTH = 200)
 #   2: DEPTH derived from the discount
 #   3: planner node allocation, ~50-65% more simulations in the same budget
-PARAM_EPOCH = 3
+#   4: all six Unity scenes redesigned (40b4070, 583611d) - new obstacle paths
+#      on SIN_*, a wider window for INT_COMPLEX's Obstacle_8, and halved
+#      move_1/move_2 timing constants that change every scene. Nothing in the
+#      planner moved, but no run from epoch 3 was recorded in these worlds.
+PARAM_EPOCH = 4
 
 TAIL_WEIGHT = 1e-6
 DEPTH = min(int(math.ceil(math.log(TAIL_WEIGHT) / math.log(DISCOUNT))),
