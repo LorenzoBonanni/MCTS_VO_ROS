@@ -457,7 +457,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 379139744}
   m_LocalRotation: {x: 0, y: 0.7071068, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: -0.53, y: 0.1, z: -2.48}
+  m_LocalPosition: {x: 0.37, y: 0.1, z: -0.1}
   m_LocalScale: {x: 0.2, y: 0.2, z: 0.2}
   m_ConstrainProportionsScale: 1
   m_Children: []
@@ -478,13 +478,15 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   simulationDt: 0.1
   amplitude: 0.2
-  frequency: 0.86
-  forwardSpeed: 0.05
-  multiplier: 2
+  frequency: 0.785
+  forwardSpeed: 0.09
+  multiplier: 1
   maxSpeed: 0.1
-  minSpeed: 0.07
+  minSpeed: 0.08
+  directionDeg: 0
   enableLogging: 1
   logInterval: 10
+  enableCsvLogging: 0
 --- !u!54 &433355419 stripped
 Rigidbody:
   m_CorrespondingSourceObject: {fileID: 8753101125338730103, guid: 7eff1578132243c24a41db94d126abc3, type: 3}
@@ -1422,7 +1424,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1275237202}
   m_LocalRotation: {x: 0, y: -0.6427876, z: 0, w: 0.7660445}
-  m_LocalPosition: {x: 1.852, y: 0.1, z: -1.887}
+  m_LocalPosition: {x: 1.73, y: 0.1, z: -0.75}
   m_LocalScale: {x: 0.2, y: 0.2, z: 0.2}
   m_ConstrainProportionsScale: 1
   m_Children: []
@@ -1445,6 +1447,7 @@ MonoBehaviour:
   max_speed: 0.2
   enableLogging: 0
   logInterval: 10
+  enableCsvLogging: 0
   resetPositionEachCycle: 1
 --- !u!1 &1277083098
 GameObject:
@@ -1537,7 +1540,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1277083098}
   m_LocalRotation: {x: 0, y: 0.86602545, z: 0, w: 0.49999994}
-  m_LocalPosition: {x: -0.29, y: 0.1, z: -1.49}
+  m_LocalPosition: {x: -0.4, y: 0.1, z: -2.21}
   m_LocalScale: {x: 0.2, y: 0.2, z: 0.2}
   m_ConstrainProportionsScale: 1
   m_Children: []
@@ -1560,6 +1563,7 @@ MonoBehaviour:
   maxSpeed: 0.2
   enableLogging: 0
   logInterval: 10
+  enableCsvLogging: 0
 --- !u!1 &1284484005
 GameObject:
   m_ObjectHideFlags: 0
@@ -1651,7 +1655,7 @@ Transform:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1284484005}
   m_LocalRotation: {x: 0, y: -0.7071068, z: 0, w: 0.7071068}
-  m_LocalPosition: {x: 0.3, y: 0.1, z: -0.97}
+  m_LocalPosition: {x: 0.43, y: 0.1, z: -1.4}
   m_LocalScale: {x: 0.2, y: 0.2, z: 0.2}
   m_ConstrainProportionsScale: 1
   m_Children: []
@@ -1672,13 +1676,15 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   simulationDt: 0.1
   amplitude: 0.2
-  frequency: 0.86
+  frequency: 0.785
   multiplier: 1
-  maxSpeed: 0.1
-  minSpeed: 0.07
-  startIdx: 100
+  maxSpeed: 0.12
+  minSpeed: 0.1
+  startIdx: 160
+  directionDeg: 0
   enableLogging: 1
   logInterval: 10
+  enableCsvLogging: 0
 --- !u!4 &1468977057 stripped
 Transform:
   m_CorrespondingSourceObject: {fileID: 8753101125198676622, guid: 7eff1578132243c24a41db94d126abc3, type: 3}

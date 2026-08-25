@@ -6,12 +6,20 @@ public class move_1 : MonoBehaviour
     public float simulationDt = 0.1f;
 
     private const float tunedDt = 0.3f;
-    private int shift = 15;
-    private int seg1 = 15;
-    private int seg2 = 20;
-    private int seg3 = 28;
-    private int seg4 = 40;
-    private int maxIdx = 80;
+    // Halved from the original 15/15/20/28/40/80 (tunedDt units, i.e. real
+    // seconds independent of simulationDt): the original values gave a ~24 s
+    // one-way recording leg before the obstacle starts bouncing within a
+    // bounded path, which is longer than one ~15 s episode - watched in the
+    // editor (no external reset) it just keeps expanding outward the whole
+    // time, eventually leaving the arena / hitting static geometry. Halving
+    // keeps the same relative segment shape but finishes recording by ~12 s,
+    // so it bounces within a fixed, arena-sized path well inside one episode.
+    private int shift = 8;
+    private int seg1 = 8;
+    private int seg2 = 10;
+    private int seg3 = 14;
+    private int seg4 = 20;
+    private int maxIdx = 40;
     public float maxSpeed = 0.15f;
 
     // State for forward precomputation
@@ -27,12 +35,14 @@ public class move_1 : MonoBehaviour
     // Speed measurement
     public Vector3 currentVelocity { get; private set; }
     public float currentSpeed { get; private set; }
+    private float maxSpeedSeen = 0f;
 
     private float accumulator = 0f;
 
     [Header("Debug Logging")]
     public bool enableLogging = true;
     public int logInterval = 10;
+    public bool enableCsvLogging = false;
 
     void Start()
     {
@@ -136,6 +146,12 @@ public class move_1 : MonoBehaviour
 
         currentVelocity = step / simulationDt;
         currentSpeed = currentVelocity.magnitude;
+        if (currentSpeed > maxSpeedSeen)
+            maxSpeedSeen = currentSpeed;
+
+        int csvStep = recording ? idx : phase;
+        ObstacleCsvLogger.LogRow(enableCsvLogging, gameObject.name, csvStep, csvStep * simulationDt,
+                                  currentPosition.x, currentPosition.z, currentSpeed, maxSpeedSeen);
 
         if (enableLogging)
         {

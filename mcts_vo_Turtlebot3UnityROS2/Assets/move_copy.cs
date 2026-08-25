@@ -51,6 +51,7 @@ public class move_copy : MonoBehaviour
     [Header("Debug Logging")]
     public bool enableLogging = true;
     public int logInterval = 10;
+    public bool enableCsvLogging = false;
 
     // State for replay
     private List<Vector3> steps = new List<Vector3>();
@@ -163,6 +164,9 @@ public class move_copy : MonoBehaviour
             maxSpeedSeen = currentSpeed;
 
         loggedSteps++;
+        ObstacleCsvLogger.LogRow(enableCsvLogging, gameObject.name, loggedSteps, loggedSteps * simulationDt,
+                                  currentPosition.x, currentPosition.z, currentSpeed, maxSpeedSeen);
+
         if (enableLogging && loggedSteps % logInterval == 0)
         {
             Debug.Log($"{GetType().Name} step {loggedSteps} | " +

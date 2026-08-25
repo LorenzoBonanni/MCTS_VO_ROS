@@ -174,3 +174,6 @@ plots/
 debug_archive/
 debug_plots/
 analysis/
+# Temporary CSV instrumentation for verifying obstacle scene redesigns
+# (see ObstacleCsvLogger.cs) - opt-in, off by default.
+obstacle_log/

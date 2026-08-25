@@ -6,9 +6,14 @@ public class move_2 : MonoBehaviour
     public float simulationDt = 0.3f;
 
     private const float tunedDt = 0.3f;
-    private int angleSwitchIdx = 50;
-    private int minIdx = 15;
-    private int maxIdx = 66;
+    // Halved from the original 50/15/66 (tunedDt units) for the same reason
+    // as move_1.cs: the original ~19.8 s recording leg outlives one ~15 s
+    // episode, so watched for a while it keeps drifting rather than settling
+    // into its bounded back-and-forth. Halved values finish recording by
+    // ~9.9 s, well inside one episode.
+    private int angleSwitchIdx = 25;
+    private int minIdx = 25;
+    private int maxIdx = 40;
     public float max_speed = 0.15f;
 
     private int idx = 0;
@@ -23,6 +28,7 @@ public class move_2 : MonoBehaviour
 
     public Vector3 currentVelocity { get; private set; }
     public float currentSpeed { get; private set; }
+    private float maxSpeedSeen = 0f;
 
     private float accumulator = 0f;
     private int totalSteps = 0;
@@ -31,6 +37,7 @@ public class move_2 : MonoBehaviour
     [Header("Debug Logging")]
     public bool enableLogging = true;
     public int logInterval = 10;
+    public bool enableCsvLogging = false;
 
     [Header("Replay Settings")]
     public bool resetPositionEachCycle = true;  // correct floating‑point drift
@@ -124,8 +131,13 @@ public class move_2 : MonoBehaviour
 
         currentVelocity = step / simulationDt;
         currentSpeed = currentVelocity.magnitude;
+        if (currentSpeed > maxSpeedSeen)
+            maxSpeedSeen = currentSpeed;
 
         totalSteps++;
+        ObstacleCsvLogger.LogRow(enableCsvLogging, gameObject.name, totalSteps, totalSteps * simulationDt,
+                                  currentPosition.x, currentPosition.z, currentSpeed, maxSpeedSeen);
+
         if (enableLogging && totalSteps % logInterval == 0)
         {
             float simTime = idx * simulationDt;

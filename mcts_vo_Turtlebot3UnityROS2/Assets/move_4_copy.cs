@@ -44,6 +44,7 @@ public class move_4_copy : MonoBehaviour
     [Header("Debug Logging")]
     public bool enableLogging = true;
     public int logInterval = 10;
+    public bool enableCsvLogging = false;
 
     // State variables
     private int idx = 0;
@@ -132,6 +133,9 @@ public class move_4_copy : MonoBehaviour
             maxSpeedSeen = currentSpeed;
 
         loggedSteps++;
+        ObstacleCsvLogger.LogRow(enableCsvLogging, gameObject.name, loggedSteps, loggedSteps * simulationDt,
+                                  currentPosition.x, currentPosition.z, currentSpeed, maxSpeedSeen);
+
         if (enableLogging && loggedSteps % logInterval == 0)
         {
             Debug.Log($"{GetType().Name} step {loggedSteps} | " +
@@ -148,6 +152,14 @@ public class move_4_copy : MonoBehaviour
         if (idx == 120 * multiplier)
         {
             mulForwardSpeed *= -1;   // reverse direction
+            // Apply the flip to forwardSpeed immediately. Bug fix: forwardSpeed
+            // previously only picked up the new mulForwardSpeed sign at the next
+            // "every 100 steps" redraw above, which is a different, unsynchronized
+            // counter from the idx reset here (100 != 120*multiplier in general).
+            // That let the obstacle keep travelling in the old direction for up
+            // to ~100 extra steps past the intended turnaround - a large,
+            // unbounded overshoot before it ever reversed.
+            forwardSpeed = -forwardSpeed;
             idx = 0;                 // restart sine phase
             // speedStepCount continues to increase (not reset)
         }
