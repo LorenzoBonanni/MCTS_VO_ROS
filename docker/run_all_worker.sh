@@ -37,60 +37,43 @@ SCENE="${TRAJ_ARR[$traj_idx]}"
 # that fiction is still trusted - which is what gamma sets, through
 # horizon = dt/(1 - gamma^dt) and the derived DEPTH.
 #
-# From the 358,400-run sweep over gamma x c x rs x mov, VO-TREE, 200 seeds per
-# cell. Each value is picked from the axis marginal at the scene's chosen gamma
-# - 2400 to 3200 runs per point - and not from the best single cell: neighbouring
-# cells differ by up to 10 points, more than any axis marginal, so the top of a
-# 512-cell ranking is mostly the winner's curse.
+# PROVENANCE. GAMMA comes from a 6400-run sweep (8 gamma values x 4 scenes x
+# 200 seeds), then RS and MOV from a 12000-run sweep (6 rs x 5 mov x 4 scenes
+# x 100 seeds, gamma held at the first sweep's per-scene value), both run on
+# the 583611d scenes (post-40b4070/583611d redesign). Epoch 4. This overturned
+# every value from the pre-redesign 358,400-run sweep; none of that history
+# still applies and is not repeated here.
 #
-# PROVENANCE, and it is mixed. GAMMA comes from a 6400-run sweep (8 values x 4
-# scenes x 200 seeds) run on the ef9eb8f scenes. All four scenes were then
-# redesigned in 40b4070/583611d - new obstacle paths on SIN_*, a wider window on
-# INT_COMPLEX's Obstacle_8, and halved move_1/move_2 timing constants that touch
-# every scene - so these gammas are STALE until the sweep is repeated. RS and C
-# are older still: the 358,400-run values, chosen on scenes whose obstacles moved
-# at 0.224 / 0.250. Treat all of it as inherited defaults, not as tuned.
+# rs and mov point in OPPOSITE directions on different scenes. On intention,
+# larger rs/mov monotonically helps, peaking at the top of the tested range
+# (rs=2.0, mov=0.25, 90% goal, still rising there - extend the grid upward
+# before trusting this as a true optimum). sinusoidal, intention_complex and
+# sinusoidal_complex all peak at rs=1.0, the BOTTOM of the tested range
+# (intention_complex is still falling there too - extend downward). Mechanism:
+# the crowded scenes have obstacles down to 0.2m apart (583611d); a large
+# rs/mov cone from one obstacle overlaps its neighbour's, so A_c=Ø (the
+# Algorithm-4 trapped fallback) triggers far more often and obsColl climbs
+# past 90%. A large cone only helps when obstacles are isolated, which is only
+# true on intention.
 #
-# gamma is the only axis with a large effect (goal 0-95% across its range). It is
-# also not unimodal: on the easy scenes there is an isolated band of obsColl
-# around an effective horizon of 1.1-1.5 s (intention 0.40, sinusoidal 0.40-0.50)
-# with good values on both sides of it. Do not tune into that band.
+# MOV must be >= the true per-scene obstacle speed or the VO guarantee is
+# void - not a tuning knob to shrink for a better score. The true maxima,
+# read off the serialised scene values (Scenes/*.unity, move_1.cs/move_2.cs,
+# confirmed independently of the ef9eb8f commit message's 0.1/0.2 claim,
+# which describes a DIFFERENT mover pair sharing the same scenes):
+#   easy scenes (INT_EASY, SIN_EASY):       move_1/move_2 maxSpeed = 0.15
+#   complex scenes (INT_COMPLEX, SIN_COMPLEX): move_1/move_2 maxSpeed = 0.20
+# Three of the four raw sweep-best cells had mov BELOW this (sinusoidal at
+# 0.10, intention_complex at 0.15, sinusoidal_complex at 0.125) - their good
+# scores partly reflect an undersized VO ball, not a better plan. Values below
+# are the best cell that still satisfies mov >= the true maximum.
 #
-# c is flat everywhere except sinusoidal, which wants >= 2.0; 5.0 is best there
-# and costs at most 2.5 points elsewhere, so one value covers all four scenes.
-#
-# rs is the second largest effect and it points in opposite directions: 1.8 is
-# worth +11 points on intention and -5 on intention_complex. Hence per-scene.
-#
-# MOV is the obstacle speed the planner assumes, and it must be >= the true one
-# or the VO guarantee fails. The VO ball already spans a full control cycle
-# (THINK_MARGIN = dt, so dt + think_margin = 0.2 s = the measured cycle), so
-# nothing has to be recovered through MOV and the only margin needed covers the
-# fact that obstacle velocity is assumed rather than measured.
-#
-# The true maxima are NOT the maxSpeed fields of the Unity scripts. Read off
-# Assets/move_*.cs together with the serialised values in Scenes/*.unity:
-#
-#   INT_*   move_copy_int / move_4_copy_int, plus move_1 / move_2 on COMPLEX.
-#           Every step is velocity * dt * (sin a, cos a), a unit direction, so
-#           the speed is exactly the configured one.
-#   SIN_*   move_copy / move_4_copy step by (forwardSpeed * dt, dSin) where
-#           dSin = amplitude * (sin(i f dt) - sin((i-1) f dt)). amplitude is the
-#           amplitude of a sine whose DERIVATIVE is the lateral velocity, so it
-#           contributes amplitude * frequency m/s on its own, on top of
-#           forwardSpeed and independent of maxSpeed. That coupling is what made
-#           the pre-ef9eb8f scenes run at 0.224 / 0.250 instead of 0.1 / 0.2.
-#
-# ef9eb8f retuned amplitude and frequency so the realised maxima are 0.1 on the
-# easy scenes and 0.2 on the complex ones, confirmed by the currentSpeed log the
-# movers now print. So MOV is simply true + 25% everywhere: 0.125 easy, 0.25
-# complex. The pre-fix asymmetry (0.25 / 0.35 on the sinusoidal scenes) existed
-# only to cover the 0.224 / 0.250 and is gone with it.
+# c is flat everywhere except sinusoidal, which wants >= 2.0; 5.0 unchanged.
 case "$SCENE" in
-    sinusoidal)          RS=1.4; GAMMA=0.65; C=5.0;  MOV=0.125 ;;
-    sinusoidal_complex)  RS=1.2; GAMMA=0.10; C=5.0;  MOV=0.25  ;;
-    intention)           RS=1.8; GAMMA=0.06; C=5.0;  MOV=0.125 ;;
-    intention_complex)   RS=1.2; GAMMA=0.30; C=5.0;  MOV=0.25  ;;
+    sinusoidal)          RS=1.0; GAMMA=0.50; C=5.0;  MOV=0.15  ;;
+    sinusoidal_complex)  RS=1.0; GAMMA=0.22; C=5.0;  MOV=0.20  ;;
+    intention)           RS=2.0; GAMMA=0.03; C=5.0;  MOV=0.25  ;;
+    intention_complex)   RS=1.0; GAMMA=0.03; C=5.0;  MOV=0.20  ;;
     *) echo "no tuned parameters for scene '$SCENE'" >&2; exit 1 ;;
 esac
 # Overridable, but the defaults above are the tuned ones.
