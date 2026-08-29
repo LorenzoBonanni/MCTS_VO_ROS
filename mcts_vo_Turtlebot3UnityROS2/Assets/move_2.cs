@@ -37,7 +37,6 @@ public class move_2 : MonoBehaviour
     [Header("Debug Logging")]
     public bool enableLogging = true;
     public int logInterval = 10;
-    public bool enableCsvLogging = false;
 
     [Header("Replay Settings")]
     public bool resetPositionEachCycle = true;  // correct floating‑point drift
@@ -135,8 +134,12 @@ public class move_2 : MonoBehaviour
             maxSpeedSeen = currentSpeed;
 
         totalSteps++;
-        ObstacleCsvLogger.LogRow(enableCsvLogging, gameObject.name, totalSteps, totalSteps * simulationDt,
-                                  currentPosition.x, currentPosition.z, currentSpeed, maxSpeedSeen);
+        if (PositionLogger.Enabled)
+        {
+            PositionLogger.LogRow(gameObject.name, totalSteps, totalSteps * simulationDt,
+                                   currentPosition.x, currentPosition.z, currentSpeed, maxSpeedSeen,
+                                   transform.localScale.x / 2f);
+        }
 
         if (enableLogging && totalSteps % logInterval == 0)
         {

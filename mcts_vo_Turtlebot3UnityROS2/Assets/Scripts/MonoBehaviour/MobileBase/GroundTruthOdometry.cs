@@ -24,10 +24,6 @@ public class GroundTruthOdometry : MonoBehaviourRosNode
     public bool PublishTf = true;
     protected override string nodeName { get { return NodeName; } }
 
-    [Header("CSV Logging (opt-in, temporary instrumentation)")]
-    public bool enableCsvLogging = false;
-    public string csvObjectName = "robot";
-
     private Vector3 _previousLoggedPosition;
     private bool _hasPreviousLoggedPosition = false;
     private float _maxSpeedSeen = 0f;
@@ -136,7 +132,7 @@ public class GroundTruthOdometry : MonoBehaviourRosNode
             }
         }
 
-        // --- Opt-in CSV logging (temporary instrumentation) ---
+        // --- Ground-truth position logging (opt-in via MCTSVO_POS_LOG_PATH) ---
         Vector3 currentPos = BaseRigidbody.transform.position;
         Vector3 instVelocity = _hasPreviousLoggedPosition
             ? (currentPos - _previousLoggedPosition) / Time.fixedDeltaTime
@@ -148,8 +144,11 @@ public class GroundTruthOdometry : MonoBehaviourRosNode
         _hasPreviousLoggedPosition = true;
         _csvStep++;
 
-        ObstacleCsvLogger.LogRow(enableCsvLogging, csvObjectName, _csvStep, _csvStep * Time.fixedDeltaTime,
-                                  currentPos.x, currentPos.z, instSpeed, _maxSpeedSeen);
+        if (PositionLogger.Enabled)
+        {
+            PositionLogger.LogRow("robot", _csvStep, _csvStep * Time.fixedDeltaTime,
+                                   currentPos.x, currentPos.z, instSpeed, _maxSpeedSeen, 0f);
+        }
     }
 
 }

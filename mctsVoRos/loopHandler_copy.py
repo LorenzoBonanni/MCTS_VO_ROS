@@ -110,6 +110,11 @@ parser.add_argument('--collect-trajectories', action='store_true',
                          'tree animation can be produced. Costs about a tenth '
                          'of the planning budget and forces the uncompiled '
                          'rollout, so it is off by default.')
+parser.add_argument('--log-positions', action='store_true',
+                    help='Record ground-truth world position of the robot and '
+                         'every obstacle, straight from Unity, to '
+                         '<out_dir>/positions_<suffix>.bin. Off by default: '
+                         'costs nothing in Unity or here when unset.')
 parser.add_argument('--no-plots', action='store_true',
                     help='Skip the debug plots and animations at the end of a '
                          'run. Rendering the trajectory GIF takes far longer '
@@ -306,6 +311,15 @@ DEPTH = min(int(math.ceil(math.log(TAIL_WEIGHT) / math.log(DISCOUNT))),
 env_build = cli_args.env_build or ENV_BUILDS[trajectories]
 out_dir = os.path.join(DEBUG_DIR, trajectories)
 os.makedirs(out_dir, exist_ok=True)
+
+# Single source of truth for the per-run filename tag; save_data() below reuses
+# this instead of recomputing it.
+suffix = f'{algorithm}_{exp_num}{cli_args.suffix}'
+
+# Full path of the ground-truth position log for this run, or None when
+# --log-positions was not passed. None is the signal used below to decide
+# whether Popen gets a modified environment at all.
+pos_log_path = os.path.join(out_dir, f'positions_{suffix}.bin') if cli_args.log_positions else None
 
 @jit(nopython=True, cache=True)
 def set_seed(value):
@@ -1144,9 +1158,6 @@ def save_data(loopHandler, exp_num):
             - Mean and standard deviation of simulation numbers
     """
 
-    # Define a suffix for file names based on the algorithm and experiment number
-    suffix = f'{algorithm}_{exp_num}{cli_args.suffix}'
-
     # Check if the loopHandler's infos attribute contains valid data
     if None not in loopHandler.infos and len(loopHandler.infos) != 0:
         # Extract the number of simulations from the infos and save it to a pickle file
@@ -1354,8 +1365,20 @@ def main(args=None):
     print(f"Environment: {env_build} | Output directory: {out_dir}")
     print(f"Render mode: {cli_args.env_render} ({' '.join(ENV_RENDER_ARGS[cli_args.env_render]) or 'default'})")
     loopHandler = LoopHandler(dt)
+    # Inherit the full environment unless ground-truth position logging was
+    # requested, in which case add one variable telling the Unity player where to
+    # write. Its presence (non-empty path) is the enable signal on the Unity side
+    # - no separate boolean env var. When --log-positions is not passed, Popen is
+    # called exactly as before (no env= kwarg), so the default path is unchanged
+    # byte-for-byte.
+    popen_kwargs = {'preexec_fn': os.setpgrp}
+    if pos_log_path is not None:
+        env = os.environ.copy()
+        env['MCTSVO_POS_LOG_PATH'] = os.path.abspath(pos_log_path)
+        popen_kwargs['env'] = env
+
     process = subprocess.Popen([env_build] + ENV_RENDER_ARGS[cli_args.env_render],
-                               preexec_fn=os.setpgrp)
+                               **popen_kwargs)
     time.sleep(2)
     try:
         executor = SingleThreadedExecutor()

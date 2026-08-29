@@ -42,7 +42,6 @@ public class move_1 : MonoBehaviour
     [Header("Debug Logging")]
     public bool enableLogging = true;
     public int logInterval = 10;
-    public bool enableCsvLogging = false;
 
     void Start()
     {
@@ -150,8 +149,12 @@ public class move_1 : MonoBehaviour
             maxSpeedSeen = currentSpeed;
 
         int csvStep = recording ? idx : phase;
-        ObstacleCsvLogger.LogRow(enableCsvLogging, gameObject.name, csvStep, csvStep * simulationDt,
-                                  currentPosition.x, currentPosition.z, currentSpeed, maxSpeedSeen);
+        if (PositionLogger.Enabled)
+        {
+            PositionLogger.LogRow(gameObject.name, csvStep, csvStep * simulationDt,
+                                   currentPosition.x, currentPosition.z, currentSpeed, maxSpeedSeen,
+                                   transform.localScale.x / 2f);
+        }
 
         if (enableLogging)
         {
