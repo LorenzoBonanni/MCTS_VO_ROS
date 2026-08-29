@@ -3,6 +3,20 @@ Parser and animation helper for the ground-truth position log produced by
 Unity's PositionLogger (mcts_vo_Turtlebot3UnityROS2/Assets/PositionLogger.cs)
 when a run is launched with --log-positions.
 
+Usage - generate the GIFs for one run:
+    1. Run the experiment with logging on, e.g.:
+         python3 loopHandler_copy.py --exp_num 0 --algorithm VO-TREE \
+             --trajectories sinusoidal --log-positions
+    2. From the same mctsVoRos/ directory (same venv):
+         from position_log import animate_run_positions, animate_run_positions_with_estimates
+         animate_run_positions('sinusoidal', 'VO-TREE', 0)
+         animate_run_positions_with_estimates('sinusoidal', 'VO-TREE', 0)
+       (pass the --suffix string as a 4th argument if the run used one)
+    They land in debug/<trajectories>/animations/positions_<algorithm>_<exp_num>.gif
+    and .../positions_estimates_<algorithm>_<exp_num>.gif. See
+    ~/Desktop/generate-position-gifs.txt for the full walkthrough including
+    environment setup.
+
 File format (little-endian throughout):
     header:  4 bytes magic b"MVPL" + 1 byte format version (currently 2)
     then a stream of tagged records:
@@ -235,6 +249,60 @@ def _hold_last_sample(positions_by_object, name, t):
     return group.iloc[idx]
 
 
+def _frame_times_from_robot_gt(robot_trajectory, positions_by_object):
+    """
+    Real Unity-clock time for each robot_trajectory frame, found by matching
+    each frame's (x, y) to the closest position in the position log's own
+    "robot" ground-truth series - NOT by assuming any clock model.
+
+    Why this is needed: trj_<suffix>.pkl (Python's executed trajectory) and
+    the position log's "robot" rows (Unity's GroundTruthOdometry) describe
+    the same physical robot, logged by two independently-clocked processes
+    with no shared timestamp. A first version of this module assumed a flat
+    `dt` seconds per trajectory frame, which is wrong in two ways: (1) rate
+    - the control loop is itself wall-clock-timed and frequently holds
+    position / repeats the last action when sensor data is stale (see
+    loopHandler_copy.py's MAX_SENSOR_AGE gate and its "stale sensor data...
+    holding position" warning), so real elapsed time per step is not
+    constant; and (2) origin - Unity starts ticking as soon as the player
+    launches, ~2s (loopHandler_copy.py's time.sleep(2)) plus ROS discovery
+    time before Python's control loop starts its own clock at frame 0, an
+    offset this module has no direct way to measure. Both errors shift
+    where an obstacle is drawn relative to the robot at a given frame, and
+    were the actual cause of an obstacle appearing to overlap the robot
+    more than the (LIDAR-based, unaffected by any of this) real collision
+    check implies.
+
+    Since /odom currently carries no injected noise (loopHandler_copy.py's
+    GroundTruthOdometry has a "TODO: add optional drift and noise" that is
+    not implemented), the two robot traces coincide almost exactly in
+    space once converted to the same frame. Matching by position instead of
+    by time sidesteps needing any clock model at all: it directly asks
+    "when, on Unity's own clock, was the robot at this position" and uses
+    that Unity time to look up every other object's position log entry, so
+    obstacles line up against the robot the way they actually did.
+
+    Returns:
+        np.ndarray of shape (len(robot_trajectory),): Unity-clock time for
+        each frame, non-decreasing (a rare position-match ambiguity, e.g.
+        while the robot is holding still, is clamped forward rather than
+        left to jump backward).
+    """
+    robot_gt = positions_by_object.get('robot')
+    if robot_gt is None or len(robot_gt) == 0:
+        raise ValueError(
+            "position log has no 'robot' entries - was GroundTruthOdometry logging?")
+
+    gt_x, gt_y = unity_xz_to_ros_xy(robot_gt['x'].to_numpy(), robot_gt['z'].to_numpy())
+    gt_xy = np.stack([gt_x, gt_y], axis=1)
+    gt_time = robot_gt['time'].to_numpy()
+
+    traj_xy = robot_trajectory[:, :2]
+    dist = np.linalg.norm(gt_xy[None, :, :] - traj_xy[:, None, :], axis=2)
+    nearest = np.argmin(dist, axis=1)
+    return np.maximum.accumulate(gt_time[nearest])
+
+
 def _draw_base_frame(ax, i, robot_trajectory, positions_by_object, times, palette):
     """
     Draws the goal, the robot (real-size circle + heading, from the executed
@@ -309,10 +377,11 @@ def _load_frame_data(scene, algorithm, exp_num, suffix_tag, debug_dir):
         name: group.sort_values('time').reset_index(drop=True)
         for name, group in positions.groupby('object')
     }
-    return robot_trajectory, positions_by_object, palette
+    times = _frame_times_from_robot_gt(robot_trajectory, positions_by_object)
+    return robot_trajectory, positions_by_object, palette, times
 
 
-def animate_run_positions(scene, algorithm, exp_num, suffix_tag='', debug_dir='debug', dt=0.1):
+def animate_run_positions(scene, algorithm, exp_num, suffix_tag='', debug_dir='debug'):
     """
     Build a GIF animating the robot's executed trajectory together with the
     ground-truth trajectory of every logged object (robot + every obstacle),
@@ -325,19 +394,14 @@ def animate_run_positions(scene, algorithm, exp_num, suffix_tag='', debug_dir='d
     Args:
         scene, algorithm, exp_num, suffix_tag, debug_dir: identify the run,
             same convention as load_run_trajectories.
-        dt (float): Control/simulation time step used for the run (the run's
-            --ts, default 0.1), used to convert a robot-trajectory frame
-            index into a simulation time for zero-order-holding each
-            object's own, differently-paced, position samples.
 
     Returns:
         str: path to the written GIF, <out_dir>/animations/positions_<suffix>.gif
     """
-    robot_trajectory, positions_by_object, palette = _load_frame_data(
+    robot_trajectory, positions_by_object, palette, times = _load_frame_data(
         scene, algorithm, exp_num, suffix_tag, debug_dir)
 
     n_frames = len(robot_trajectory)
-    times = np.arange(n_frames) * dt
 
     fig, ax = plt.subplots()
     ani = FuncAnimation(
@@ -361,7 +425,7 @@ def animate_run_positions(scene, algorithm, exp_num, suffix_tag='', debug_dir='d
 
 
 def animate_run_positions_with_estimates(scene, algorithm, exp_num, suffix_tag='',
-                                          debug_dir='debug', dt=0.1):
+                                          debug_dir='debug'):
     """
     Same as animate_run_positions, but additionally overlays the planner's
     own per-step obstacle estimate (obs_<suffix>.pkl, dashed black circles)
@@ -371,12 +435,11 @@ def animate_run_positions_with_estimates(scene, algorithm, exp_num, suffix_tag='
         str: path to the written GIF,
              <out_dir>/animations/positions_estimates_<suffix>.gif
     """
-    robot_trajectory, positions_by_object, palette = _load_frame_data(
+    robot_trajectory, positions_by_object, palette, times = _load_frame_data(
         scene, algorithm, exp_num, suffix_tag, debug_dir)
     obstacle_estimates = load_obstacle_estimates(scene, algorithm, exp_num, suffix_tag, debug_dir)
 
     n_frames = len(robot_trajectory)
-    times = np.arange(n_frames) * dt
 
     fig, ax = plt.subplots()
     ani = FuncAnimation(
