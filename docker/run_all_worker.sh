@@ -65,14 +65,28 @@ SCENE="${TRAJ_ARR[$traj_idx]}"
 #   complex scenes (INT_COMPLEX, SIN_COMPLEX): move_1/move_2 maxSpeed = 0.20
 # Three of the four raw sweep-best cells had mov BELOW this (sinusoidal at
 # 0.10, intention_complex at 0.15, sinusoidal_complex at 0.125) - their good
-# scores partly reflect an undersized VO ball, not a better plan. Values below
-# are the best cell that still satisfies mov >= the true maximum.
+# scores partly reflect an undersized VO ball, not a better plan.
+#
+# Above the floor, MOV was picked per scene by whether the extra margin buys
+# real safety at n=100/cell, not just goal%:
+#   intention: floor (0.15) already has volColl=0 across every tested mov, so
+#     the raw-best 0.25 buys nothing measurable and isn't worth an unverified
+#     margin - use the floor.
+#   sinusoidal: floor (0.15) IS the raw-best cell (97% goal, volColl=0) -
+#     nothing to trade off.
+#   intention_complex: floor (0.20) gives 70% goal/5% volColl; 0.25 gives 60%/
+#     1%. At n=100 a 5% and a 1% rate have overlapping 95% CIs (roughly
+#     0.7-9.3% vs 0-3.9%) while the 10-point goal drop is not noise - paying
+#     for an unproven safety gain isn't justified, use the floor.
+#   sinusoidal_complex: floor (0.20) gives 8%/5%; 0.25 gives 7%/0% - a 1-point
+#     goal cost for volColl clearly to zero. Worth it - use 0.25, not the
+#     floor.
 #
 # c is flat everywhere except sinusoidal, which wants >= 2.0; 5.0 unchanged.
 case "$SCENE" in
     sinusoidal)          RS=1.0; GAMMA=0.50; C=5.0;  MOV=0.15  ;;
-    sinusoidal_complex)  RS=1.0; GAMMA=0.22; C=5.0;  MOV=0.20  ;;
-    intention)           RS=2.0; GAMMA=0.03; C=5.0;  MOV=0.25  ;;
+    sinusoidal_complex)  RS=1.0; GAMMA=0.22; C=5.0;  MOV=0.25  ;;
+    intention)           RS=2.0; GAMMA=0.03; C=5.0;  MOV=0.15  ;;
     intention_complex)   RS=1.0; GAMMA=0.03; C=5.0;  MOV=0.20  ;;
     *) echo "no tuned parameters for scene '$SCENE'" >&2; exit 1 ;;
 esac
