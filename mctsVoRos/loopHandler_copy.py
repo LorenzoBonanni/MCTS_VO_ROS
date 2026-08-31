@@ -153,11 +153,11 @@ parser.add_argument('--env-render', default='headless', type=str,
                          "'headless' gives 49.7 Hz. Since control_loop skips a "
                          'tick whenever the sensor data is older than one cycle, '
                          'that rate is the hard floor on the cycle time: '
-                         'cycle >= 2/rate. NOTE the scenes currently in '
-                         'env_build/ are NOT configured for 50 Hz: '
-                         'turtlebot3_burger.prefab sets ScanningFrequency and '
-                         'OdometryPublishingFrequency to 10, and both topics were '
-                         'measured at 10.0 Hz under headless.')
+                         'cycle >= 2/rate. turtlebot3_burger.prefab itself '
+                         'defaults ScanningFrequency/OdometryPublishingFrequency '
+                         'to 10, but a scene can override both on its robot '
+                         'PrefabInstance (INT_COMPLEX raises them to 50): check '
+                         'the scene\'s own override before assuming either rate.')
 parser.add_argument('--max-sensor-age', default=None, type=float,
                     help='Reject sensor data older than this many seconds and '
                          'hold position instead of planning on it. Defaults to '
@@ -301,7 +301,14 @@ DISCOUNT = GAMMA_S ** dt
 #      on SIN_*, a wider window for INT_COMPLEX's Obstacle_8, and halved
 #      move_1/move_2 timing constants that change every scene. Nothing in the
 #      planner moved, but no run from epoch 3 was recorded in these worlds.
-PARAM_EPOCH = 4
+#   5: INT_COMPLEX - Obstacle_2 relocated onto the direct path (~32% of the
+#      way to goal); Obstacle_9's heading-noise amplitude narrowed 2.5 -> 0.8
+#      (move_4_copy_int.cs, per-instance override).
+#   6: INT_COMPLEX - Obstacle_9 and Obstacle_10's patrol waypoints shortened
+#      (move_4_copy_int.cs / move_copy_int.cs, per-instance overrides) so
+#      their routes no longer sweep through the Obstacle_2 bypass corridor
+#      or the goal approach.
+PARAM_EPOCH = 6
 
 TAIL_WEIGHT = 1e-6
 DEPTH = min(int(math.ceil(math.log(TAIL_WEIGHT) / math.log(DISCOUNT))),

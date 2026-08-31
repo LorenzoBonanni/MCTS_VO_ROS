@@ -117,6 +117,19 @@ STATIC_OBSTACLE_IS_CUBE = np.array([False, False, False, False, True, True])
 STATIC_OBSTACLE_RAD = np.full(len(STATIC_OBSTACLE_POS), 0.100)
 STATIC_CUBE_SIDE = 0.2
 
+# Per-scene overrides for individual static obstacle positions.
+_SCENE_STATIC_OVERRIDES = {
+    'intention_complex': {1: np.array([-0.55736, -1.00288])},
+}
+
+
+def _static_obstacles_for_scene(scene):
+    """STATIC_OBSTACLE_POS with any per-scene relocation applied."""
+    pos = STATIC_OBSTACLE_POS.copy()
+    for idx, new_pos in _SCENE_STATIC_OVERRIDES.get(scene, {}).items():
+        pos[idx] = new_pos
+    return pos
+
 # Fixed arena bounds, matching the [-4, 2] x [-4, 2] convention used by
 # MCTS_VO.experiment_utils.plot_frame2 for the existing trajectory_*.gif.
 _AXIS_LIMITS = (-4, 2)
@@ -317,7 +330,7 @@ def _frame_times_from_robot_gt(robot_trajectory, positions_by_object):
     return np.maximum.accumulate(gt_time[nearest])
 
 
-def _draw_base_frame(ax, i, robot_trajectory, positions_by_object, times, palette):
+def _draw_base_frame(ax, i, robot_trajectory, positions_by_object, times, palette, scene):
     """
     Draws the goal, the robot (real-size circle + heading, from the executed
     trajectory) and every ground-truth obstacle (real-size circle, from the
@@ -334,7 +347,8 @@ def _draw_base_frame(ax, i, robot_trajectory, positions_by_object, times, palett
     # axis-aligned square footprint, not a circle - see STATIC_OBSTACLE_RAD's
     # comment for why neither the inscribed nor the circumscribed circle is
     # the real shape the robot can clip.
-    for pos, rad, is_cube in zip(STATIC_OBSTACLE_POS, STATIC_OBSTACLE_RAD, STATIC_OBSTACLE_IS_CUBE):
+    static_obstacle_pos = _static_obstacles_for_scene(scene)
+    for pos, rad, is_cube in zip(static_obstacle_pos, STATIC_OBSTACLE_RAD, STATIC_OBSTACLE_IS_CUBE):
         if is_cube:
             corner = (pos[0] - STATIC_CUBE_SIDE / 2, pos[1] - STATIC_CUBE_SIDE / 2)
             ax.add_patch(plt.Rectangle(corner, STATIC_CUBE_SIDE, STATIC_CUBE_SIDE, color="dimgray"))
@@ -370,14 +384,14 @@ def _draw_base_frame(ax, i, robot_trajectory, positions_by_object, times, palett
     ax.set_ylim(_AXIS_LIMITS)
 
 
-def _plot_position_frame(i, robot_trajectory, positions_by_object, times, ax, palette):
-    _draw_base_frame(ax, i, robot_trajectory, positions_by_object, times, palette)
+def _plot_position_frame(i, robot_trajectory, positions_by_object, times, ax, palette, scene):
+    _draw_base_frame(ax, i, robot_trajectory, positions_by_object, times, palette, scene)
     ax.legend(loc='upper right', fontsize='small')
 
 
 def _plot_position_frame_with_estimates(i, robot_trajectory, positions_by_object, times,
-                                         obstacle_estimates, ax, palette):
-    _draw_base_frame(ax, i, robot_trajectory, positions_by_object, times, palette)
+                                         obstacle_estimates, ax, palette, scene):
+    _draw_base_frame(ax, i, robot_trajectory, positions_by_object, times, palette, scene)
 
     # ESTIMATED OBSTACLES (the planner's own per-step LIDAR-based estimate,
     # obs_<suffix>.pkl, indexed by the same step i as robot_trajectory).
@@ -389,15 +403,29 @@ def _plot_position_frame_with_estimates(i, robot_trajectory, positions_by_object
     ax.legend(loc='upper right', fontsize='small')
 
 
+def _unwrap_time(time_column):
+    """Make a logged 'time' column monotonic by undoing any resets, without
+    changing row order."""
+    t = time_column.to_numpy(dtype=float)
+    out = t.copy()
+    offset = 0.0
+    for i in range(1, len(t)):
+        if t[i] + 1e-9 < t[i - 1]:
+            offset += t[i - 1]
+        out[i] = t[i] + offset
+    return out
+
+
 def _load_frame_data(scene, algorithm, exp_num, suffix_tag, debug_dir):
     robot_trajectory, positions = load_run_trajectories(
         scene, algorithm, exp_num, suffix_tag, debug_dir)
 
     palette = _object_palette(positions['object'].unique())
-    positions_by_object = {
-        name: group.sort_values('time').reset_index(drop=True)
-        for name, group in positions.groupby('object')
-    }
+    positions_by_object = {}
+    for name, group in positions.groupby('object', sort=False):
+        group = group.reset_index(drop=True)
+        group['time'] = _unwrap_time(group['time'])
+        positions_by_object[name] = group
     times = _frame_times_from_robot_gt(robot_trajectory, positions_by_object)
     return robot_trajectory, positions_by_object, palette, times
 
@@ -428,7 +456,7 @@ def animate_run_positions(scene, algorithm, exp_num, suffix_tag='', debug_dir='d
     ani = FuncAnimation(
         fig,
         _plot_position_frame,
-        fargs=(robot_trajectory, positions_by_object, times, ax, palette),
+        fargs=(robot_trajectory, positions_by_object, times, ax, palette, scene),
         frames=tqdm(range(n_frames), file=sys.stdout),
         save_count=None,
         cache_frame_data=False,
@@ -466,7 +494,7 @@ def animate_run_positions_with_estimates(scene, algorithm, exp_num, suffix_tag='
     ani = FuncAnimation(
         fig,
         _plot_position_frame_with_estimates,
-        fargs=(robot_trajectory, positions_by_object, times, obstacle_estimates, ax, palette),
+        fargs=(robot_trajectory, positions_by_object, times, obstacle_estimates, ax, palette, scene),
         frames=tqdm(range(n_frames), file=sys.stdout),
         save_count=None,
         cache_frame_data=False,

@@ -6,10 +6,11 @@ public class move_copy_int : MonoBehaviour
     // For determinism, keep this constant across runs.
     public float simulationDt = 0.3f;
 
-    // Goals (same as original)
-    private static readonly Vector3 goal1 = new Vector3(1.731f, 0.1f, -2.018f);
-    private static readonly Vector3 goal2 = new Vector3(-0.53f, 0.1f, -2.48f);
-    private Vector3 goal = goal1;
+    // Goals (same as original, serialized so a scene can override the patrol
+    // endpoints per-instance without changing the default for other scenes).
+    public Vector3 goal1 = new Vector3(1.731f, 0.1f, -2.018f);
+    public Vector3 goal2 = new Vector3(-0.53f, 0.1f, -2.48f);
+    private Vector3 goal;
 
     // Parameters
     public float velocity = 0.15f;

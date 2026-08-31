@@ -6,15 +6,17 @@ public class move_4_copy_int : MonoBehaviour
     // For determinism, keep this constant across runs.
     public float simulationDt = 0.3f;
 
-    // Goals (same as original)
-    private static readonly Vector3 goal1 = new Vector3(-0.53f, 0.1f, -1.14f);
-    private static readonly Vector3 goal2 = new Vector3(1.826f, 0.1f, -1.139f);
-    private Vector3 goal = goal1;
+    // Goals (same as original, serialized so a scene can override the patrol
+    // endpoints per-instance without changing the default for other scenes).
+    public Vector3 goal1 = new Vector3(-0.53f, 0.1f, -1.14f);
+    public Vector3 goal2 = new Vector3(1.826f, 0.1f, -1.139f);
+    private Vector3 goal;
 
     // State variables
     private int idx = 0;
     private float randNum = 0.0f;
     public float velocity = 0.15f;
+    public float perturbationAmplitude = 2.5f;
 
     // Exact position (no interpolation)
     private Vector3 currentPosition;
@@ -80,7 +82,7 @@ public class move_4_copy_int : MonoBehaviour
         // 2. Generate new random perturbation every 100 steps
         if (idx % 100 == 0)
         {
-            randNum = Random.Range(-0.5f, 0.5f) * 2.5f;
+            randNum = Random.Range(-0.5f, 0.5f) * perturbationAmplitude;
         }
 
         // 3. Compute direction toward goal
