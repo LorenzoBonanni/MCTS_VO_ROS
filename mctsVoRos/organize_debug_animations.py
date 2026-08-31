@@ -17,10 +17,18 @@ positions_<suffix>.gif, so re-running after an interruption only processes
 what's left. Run from mctsVoRos/ (matching every other script here):
 
     docker/run.sh python3 organize_debug_animations.py
+
+Runs are independent (each writes only its own files, keyed by its own
+suffix), so they're rendered in a process pool - one process per CPU core.
+Multiprocessing, not threading: matplotlib/pyplot keeps global figure state
+that isn't thread-safe, but is fine across separate processes. MPLBACKEND=Agg
+is set at the image level (docker/Dockerfile), so no display is needed in any
+worker.
 """
 import os
 import shutil
 import sys
+from concurrent.futures import ProcessPoolExecutor
 
 from position_log import animate_run_positions, animate_run_positions_with_estimates
 from summarize_debug import discover, outcome_of
@@ -61,6 +69,16 @@ def move_animations(scene, algorithm, suffix, dest):
     return moved
 
 
+def _silence_tqdm():
+    # Each animate_run_positions[_with_estimates] call drives its own tqdm
+    # progress bar; with a dozen-plus worker processes writing to the same
+    # terminal at once those interleave into unreadable noise. Only the
+    # per-run done/skip/FAIL lines from process_run are worth seeing when
+    # running in parallel.
+    import position_log
+    position_log.tqdm = lambda iterable, **kwargs: iterable
+
+
 def process_run(run):
     scene = run.trajectories
     algorithm = run.algorithm
@@ -93,8 +111,12 @@ def process_run(run):
 def main():
     runs = discover(DEBUG_ROOT)
     print(f"{len(runs)} runs found")
-    for run in runs:
-        process_run(run)
+    workers = max((os.cpu_count() or 4) // 2, 1)
+    print(f"rendering with {workers} worker processes")
+    with ProcessPoolExecutor(max_workers=workers, initializer=_silence_tqdm) as pool:
+        # list() drains the iterator so we actually wait for every run; each
+        # worker prints its own done/skip/FAIL line as it finishes.
+        list(pool.map(process_run, runs))
 
 
 if __name__ == "__main__":
