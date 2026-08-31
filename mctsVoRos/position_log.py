@@ -88,11 +88,13 @@ GOAL = np.array([-2.783, -0.720])
 # robot's circle as in the existing trajectory_<suffix>.gif.
 ROBOT_RADIUS = 0.15
 
-# The six static obstacles, in ROS frame, with their fixed radius. Copied
-# from LoopHandler.__init__ (loopHandler_copy.py:383-391, self.gt_obs_pos /
+# The six static obstacles, in ROS frame. Positions copied from
+# LoopHandler.__init__ (loopHandler_copy.py:383-391, self.gt_obs_pos /
 # self.gt_obs_rad) - read once off the scene transforms and never persisted
 # per-run, same situation as GOAL above. Only the (x, y) columns matter here;
 # the source array's trailing two columns are unrelated state-vector padding.
+# Confirmed identical (position, mesh, scale) across all four scenes by
+# reading the scene files directly, not assumed from the shared array alone.
 STATIC_OBSTACLE_POS = np.array([
     [-0.399,  0.420],
     [-1.542, -1.790],
@@ -101,7 +103,19 @@ STATIC_OBSTACLE_POS = np.array([
     [-0.317, -1.820],
     [-3.020,  0.363],
 ])
+
+# Four are spheres (0.2 localScale on Unity's unit sphere -> 0.1m radius);
+# the last two (Obstacle_5, Obstacle_6, matched by position against the scene
+# files) are cubes (0.2 localScale on Unity's unit cube -> 0.2m side,
+# identity rotation in every scene - axis-aligned, so no rotation to draw).
+# STATIC_OBSTACLE_RAD stays a true radius, used for spheres only; cubes are
+# drawn as an actual square (see _draw_base_frame) instead of being
+# approximated by a circle in either direction - inscribed (0.1) undershoots
+# the corners, circumscribed (0.1*sqrt(2)) overshoots the faces, and neither
+# is the real footprint the robot can actually clip.
+STATIC_OBSTACLE_IS_CUBE = np.array([False, False, False, False, True, True])
 STATIC_OBSTACLE_RAD = np.full(len(STATIC_OBSTACLE_POS), 0.100)
+STATIC_CUBE_SIDE = 0.2
 
 # Fixed arena bounds, matching the [-4, 2] x [-4, 2] convention used by
 # MCTS_VO.experiment_utils.plot_frame2 for the existing trajectory_*.gif.
@@ -316,9 +330,16 @@ def _draw_base_frame(ax, i, robot_trajectory, positions_by_object, times, palett
     # GOAL POSITION
     ax.plot(GOAL[0], GOAL[1], "xb", label="Goal")
 
-    # STATIC OBSTACLES (fixed every frame)
-    for pos, rad in zip(STATIC_OBSTACLE_POS, STATIC_OBSTACLE_RAD):
-        ax.add_patch(plt.Circle(pos, rad, color="dimgray"))
+    # STATIC OBSTACLES (fixed every frame). Cubes are drawn as their true
+    # axis-aligned square footprint, not a circle - see STATIC_OBSTACLE_RAD's
+    # comment for why neither the inscribed nor the circumscribed circle is
+    # the real shape the robot can clip.
+    for pos, rad, is_cube in zip(STATIC_OBSTACLE_POS, STATIC_OBSTACLE_RAD, STATIC_OBSTACLE_IS_CUBE):
+        if is_cube:
+            corner = (pos[0] - STATIC_CUBE_SIDE / 2, pos[1] - STATIC_CUBE_SIDE / 2)
+            ax.add_patch(plt.Rectangle(corner, STATIC_CUBE_SIDE, STATIC_CUBE_SIDE, color="dimgray"))
+        else:
+            ax.add_patch(plt.Circle(pos, rad, color="dimgray"))
 
     # ROBOT: real-size circle + heading tick, from the executed trajectory
     # (ROS frame), matching MCTS_VO.experiment_utils.plot_robot.
