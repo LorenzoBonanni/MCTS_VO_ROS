@@ -18,8 +18,7 @@ if [[ -z "${SLURM_ARRAY_TASK_ID}" || -z "${SLURM_PROCID}" ]]; then
     echo "expects SLURM_ARRAY_TASK_ID and SLURM_PROCID to be set" >&2
     exit 1
 fi
-# 4, matching sweep.sbatch's --ntasks-per-node=4. Change both together.
-task_id=$(( SLURM_ARRAY_TASK_ID * 4 + SLURM_PROCID ))
+task_id=$(( SLURM_ARRAY_TASK_ID * 8 + SLURM_PROCID ))
 
 # All set by sweep.sbatch, checked up front with no defaults: a missing grid
 # variable used to surface as a division by zero forty lines further down.
