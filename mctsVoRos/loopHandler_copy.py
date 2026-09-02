@@ -115,18 +115,26 @@ parser.add_argument('--log-positions', action='store_true',
                          'every obstacle, straight from Unity, to '
                          '<out_dir>/positions_<suffix>.bin. Off by default: '
                          'costs nothing in Unity or here when unset.')
-parser.add_argument('--trapped-escape', action='store_true',
+parser.add_argument('--trapped-escape', default='off', type=str,
+                    choices=['off', 'blended', 'per-obstacle', 'per-obstacle-no-stop'],
                     help="Change the Algorithm 4 trapped fallback (robot "
                          "centre inside an obstacle's VO ball) from a forced "
-                         "full stop to a computed escape action - the "
-                         "weighted-vector-sum direction away from every "
-                         "trapping obstacle, executed forward or reverse "
-                         "(whichever needs less turning), still offered "
-                         "alongside the old stop so the tree can fall back to "
-                         "it. Off by default, reproducing every prior "
-                         'campaign\'s behaviour unchanged. VO-TREE and '
-                         'VO-PLANNER only - plain MCTS has no VO pruning and '
-                         'therefore no "trapped" concept to change.')
+                         "full stop to a computed escape action. 'off' "
+                         "(default) reproduces every prior campaign's "
+                         "behaviour unchanged. 'blended' computes one escape "
+                         "heading as a weighted vector sum across every "
+                         "trapping obstacle, plus the old stop - the first "
+                         "design tried; can point at a third, non-trapping "
+                         "obstacle neither term accounts for. 'per-obstacle' "
+                         "(recommended) computes a forward/reverse pair PER "
+                         "trapping obstacle instead of one blended direction, "
+                         "plus the old stop. 'per-obstacle-no-stop' is the "
+                         "same without the stop candidate - measured worse "
+                         "in a matched-seed test (collision% 10%->50%, goal% "
+                         "back to the no-escape baseline), kept only so that "
+                         "result is reproducible. VO-TREE and VO-PLANNER "
+                         "only - plain MCTS has no VO pruning and therefore "
+                         'no "trapped" concept to change.')
 parser.add_argument('--no-plots', action='store_true',
                     help='Skip the debug plots and animations at the end of a '
                          'run. Rendering the trajectory GIF takes far longer '
@@ -260,8 +268,8 @@ LEGACY_VO = cli_args.vo_geometry == 'legacy'
 # Applied at import time, i.e. before any environment or planner is built, so
 # that no code path can observe the default first.
 set_legacy_vo(LEGACY_VO)
-TRAPPED_ESCAPE = cli_args.trapped_escape
-set_trapped_escape(TRAPPED_ESCAPE)
+TRAPPED_ESCAPE_MODE = cli_args.trapped_escape
+set_trapped_escape(TRAPPED_ESCAPE_MODE)
 RANGE_METRIC = cli_args.range_metric
 set_range_size_metric(RANGE_METRIC == 'width')
 ROLLOUT_COLLISION_CHECK = cli_args.rollout_collision == 'check'
@@ -1372,7 +1380,7 @@ def save_data(loopHandler, exp_num):
         "radiusScale": RADIUS_SCALE,
         "maxObsRadius": MAX_OBS_RADIUS,
         "voGeometry": cli_args.vo_geometry,
-        "trappedEscape": TRAPPED_ESCAPE,
+        "trappedEscape": TRAPPED_ESCAPE_MODE,
         "maxObsVel": cli_args.max_obs_vel,
         "explorationC": EXPLORATION_C,
         "gammaPerSecond": GAMMA_S,

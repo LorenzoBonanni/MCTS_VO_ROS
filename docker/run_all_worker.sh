@@ -121,17 +121,13 @@ if [[ -z "$PARAM_EPOCH" ]]; then
     exit 1
 fi
 
-# store_true CLI flag, not a value: pass --trapped-escape only when set, and
-# match the CSV's serialised bool ("True"/"False", same as reachGoal/collision).
-TRAPPED_ESCAPE_ARG=()
-TRAPPED_ESCAPE_COL="False"
-if [[ "${TRAPPED_ESCAPE:-}" == "1" || "${TRAPPED_ESCAPE:-}" == "true" ]]; then
-    TRAPPED_ESCAPE_ARG=(--trapped-escape)
-    TRAPPED_ESCAPE_COL="True"
-fi
+# --trapped-escape takes a mode string (off/blended/per-obstacle/
+# per-obstacle-no-stop), matching loopHandler_copy.py's choices - default
+# "off" reproduces every prior campaign unchanged.
+TRAPPED_ESCAPE="${TRAPPED_ESCAPE:-off}"
 
 params_match() {
-    awk -F, -v want="$RS|$GAMMA|$C|$MOV|${MAX_OBS_RADIUS:-0.5}|${VO_GEOMETRY:-paper}|$PARAM_EPOCH|${RANGE_METRIC:-norm}|$TRAPPED_ESCAPE_COL" '
+    awk -F, -v want="$RS|$GAMMA|$C|$MOV|${MAX_OBS_RADIUS:-0.5}|${VO_GEOMETRY:-paper}|$PARAM_EPOCH|${RANGE_METRIC:-norm}|$TRAPPED_ESCAPE" '
         NR == 1 { for (i = 1; i <= NF; i++) h[$i] = i; next }
         NR == 2 {
             split(want, w, "|")
@@ -234,7 +230,7 @@ for attempt in 1 2; do
         --max-obs-radius "${MAX_OBS_RADIUS:-0.5}" \
         --vo-geometry "${VO_GEOMETRY:-paper}" \
         --range-metric "${RANGE_METRIC:-norm}" \
-        "${TRAPPED_ESCAPE_ARG[@]}" \
+        --trapped-escape "$TRAPPED_ESCAPE" \
         >> "$LOG" 2>&1
     rc=$?
     set -e
