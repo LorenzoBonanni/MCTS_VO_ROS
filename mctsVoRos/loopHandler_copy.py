@@ -29,7 +29,7 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from skimage.measure import CircleModel, ransac
 from functools import partial
-from MCTS_VO.bettergym.agents.utils.vo import epsilon_uniform_uniform_vo, set_legacy_vo
+from MCTS_VO.bettergym.agents.utils.vo import epsilon_uniform_uniform_vo, set_legacy_vo, set_trapped_escape, robot_trapped
 from rclpy.time import Time
 
 
@@ -115,6 +115,18 @@ parser.add_argument('--log-positions', action='store_true',
                          'every obstacle, straight from Unity, to '
                          '<out_dir>/positions_<suffix>.bin. Off by default: '
                          'costs nothing in Unity or here when unset.')
+parser.add_argument('--trapped-escape', action='store_true',
+                    help="Change the Algorithm 4 trapped fallback (robot "
+                         "centre inside an obstacle's VO ball) from a forced "
+                         "full stop to a computed escape action - the "
+                         "weighted-vector-sum direction away from every "
+                         "trapping obstacle, executed forward or reverse "
+                         "(whichever needs less turning), still offered "
+                         "alongside the old stop so the tree can fall back to "
+                         "it. Off by default, reproducing every prior "
+                         'campaign\'s behaviour unchanged. VO-TREE and '
+                         'VO-PLANNER only - plain MCTS has no VO pruning and '
+                         'therefore no "trapped" concept to change.')
 parser.add_argument('--no-plots', action='store_true',
                     help='Skip the debug plots and animations at the end of a '
                          'run. Rendering the trajectory GIF takes far longer '
@@ -248,6 +260,8 @@ LEGACY_VO = cli_args.vo_geometry == 'legacy'
 # Applied at import time, i.e. before any environment or planner is built, so
 # that no code path can observe the default first.
 set_legacy_vo(LEGACY_VO)
+TRAPPED_ESCAPE = cli_args.trapped_escape
+set_trapped_escape(TRAPPED_ESCAPE)
 RANGE_METRIC = cli_args.range_metric
 set_range_size_metric(RANGE_METRIC == 'width')
 ROLLOUT_COLLISION_CHECK = cli_args.rollout_collision == 'check'
@@ -592,6 +606,12 @@ class LoopHandler(Node):
         self.reached_goal = False
         self.collision = False
         self.obs_collision = False
+        # Was the robot trapped (Algorithm 4, robot centre inside an
+        # obstacle's VO ball) at the state that produced last_action - set
+        # alongside last_action itself, read back only to classify a
+        # collision that follows it. See trapped_escape_collision below.
+        self.last_trapped = False
+        self.trapped_escape_collision = False
         self.max_steps = False
         self.distances = None
         self.angles = None
@@ -1031,6 +1051,13 @@ class LoopHandler(Node):
 
             # Determine if the collision was with an obstacle or due to other reasons
             self.obs_collision = self.collision and self.last_action[0] == 0
+            # A voluntary collision (last_action[0] != 0) that follows a
+            # trapped state: only possible with --trapped-escape (without it,
+            # trapped always forces last_action[0] == 0, which classifies as
+            # obs_collision above, never here) - the escape action was taken
+            # and still ended in contact, rather than an ordinary driving
+            # collision unrelated to the trapped fallback.
+            self.trapped_escape_collision = self.collision and self.last_action[0] != 0 and self.last_trapped
             self.collision = self.collision and self.last_action[0] != 0
 
             # Check if the maximum number of steps has been reached
@@ -1081,8 +1108,11 @@ class LoopHandler(Node):
         self.infos.append(info)
         self.actions.append(action)
 
-        # Update the last action taken
+        # Update the last action taken, and whether the state it was chosen
+        # from was trapped - read back if a collision follows on the next
+        # cycle (see trapped_escape_collision at the termination check).
         self.last_action = action
+        self.last_trapped = robot_trapped(self.s0.x, self.obs_pos, self.obs_rad, self.config)
 
         # Calculate the time taken for planning
         t2 = time.time() - initial_time
@@ -1191,6 +1221,18 @@ def save_data(loopHandler, exp_num):
             },
             open(f"{out_dir}/depths_{suffix}.pkl", 'wb')
         )
+
+        # Root-level UCB diagnostics: q_values/visits per action at every
+        # planning step, for offline analysis of value- vs exploration-driven
+        # action selection (VO-TREE/MCTS only; VO-PLANNER has no tree/info).
+        root_ucb = [
+            {
+                "q_values": i.get("q_values"),
+                "visits": i.get("visits"),
+            }
+            for i in loopHandler.infos
+        ]
+        pickle.dump(root_ucb, open(f"{out_dir}/root_ucb_{suffix}.pkl", 'wb'))
     else:
         # If infos contains None, initialize sim_num as an empty list
         sim_num = []
@@ -1285,6 +1327,7 @@ def save_data(loopHandler, exp_num):
         "reachGoal": loopHandler.reached_goal,
         "collision": loopHandler.collision,
         "Obscollision": loopHandler.obs_collision,
+        "trappedEscapeCollision": loopHandler.trapped_escape_collision,
         "maxSteps": loopHandler.max_steps,
         "nSteps": loopHandler.i + 1,
         "discountedReturn": discounted_return,
@@ -1329,6 +1372,7 @@ def save_data(loopHandler, exp_num):
         "radiusScale": RADIUS_SCALE,
         "maxObsRadius": MAX_OBS_RADIUS,
         "voGeometry": cli_args.vo_geometry,
+        "trappedEscape": TRAPPED_ESCAPE,
         "maxObsVel": cli_args.max_obs_vel,
         "explorationC": EXPLORATION_C,
         "gammaPerSecond": GAMMA_S,

@@ -121,8 +121,17 @@ if [[ -z "$PARAM_EPOCH" ]]; then
     exit 1
 fi
 
+# store_true CLI flag, not a value: pass --trapped-escape only when set, and
+# match the CSV's serialised bool ("True"/"False", same as reachGoal/collision).
+TRAPPED_ESCAPE_ARG=()
+TRAPPED_ESCAPE_COL="False"
+if [[ "${TRAPPED_ESCAPE:-}" == "1" || "${TRAPPED_ESCAPE:-}" == "true" ]]; then
+    TRAPPED_ESCAPE_ARG=(--trapped-escape)
+    TRAPPED_ESCAPE_COL="True"
+fi
+
 params_match() {
-    awk -F, -v want="$RS|$GAMMA|$C|$MOV|${MAX_OBS_RADIUS:-0.5}|${VO_GEOMETRY:-paper}|$PARAM_EPOCH|${RANGE_METRIC:-norm}" '
+    awk -F, -v want="$RS|$GAMMA|$C|$MOV|${MAX_OBS_RADIUS:-0.5}|${VO_GEOMETRY:-paper}|$PARAM_EPOCH|${RANGE_METRIC:-norm}|$TRAPPED_ESCAPE_COL" '
         NR == 1 { for (i = 1; i <= NF; i++) h[$i] = i; next }
         NR == 2 {
             split(want, w, "|")
@@ -137,6 +146,9 @@ params_match() {
             # from epoch 1 or earlier: never reusable once it has been bumped.
             if (!("paramEpoch" in h) || ($h["paramEpoch"] + 0) != (w[7] + 0)) exit 1
             if (!("rangeMetric" in h) || $h["rangeMetric"] != w[8]) exit 1
+            # Absent (older CSV, predates this flag) is not a match once the
+            # column exists - resolves the same way every other flag here does.
+            if (!("trappedEscape" in h) || $h["trappedEscape"] != w[9]) exit 1
             exit 0
         }
         END { if (NR < 2) exit 1 }   # header only, or empty
@@ -222,6 +234,7 @@ for attempt in 1 2; do
         --max-obs-radius "${MAX_OBS_RADIUS:-0.5}" \
         --vo-geometry "${VO_GEOMETRY:-paper}" \
         --range-metric "${RANGE_METRIC:-norm}" \
+        "${TRAPPED_ESCAPE_ARG[@]}" \
         >> "$LOG" 2>&1
     rc=$?
     set -e
