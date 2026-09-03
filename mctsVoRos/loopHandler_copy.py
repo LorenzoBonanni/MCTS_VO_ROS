@@ -116,7 +116,8 @@ parser.add_argument('--log-positions', action='store_true',
                          '<out_dir>/positions_<suffix>.bin. Off by default: '
                          'costs nothing in Unity or here when unset.')
 parser.add_argument('--trapped-escape', default='off', type=str,
-                    choices=['off', 'blended', 'per-obstacle', 'per-obstacle-no-stop'],
+                    choices=['off', 'blended', 'per-obstacle', 'per-obstacle-no-stop',
+                             'per-obstacle-nearest'],
                     help="Change the Algorithm 4 trapped fallback (robot "
                          "centre inside an obstacle's VO ball) from a forced "
                          "full stop to a computed escape action. 'off' "
@@ -125,14 +126,23 @@ parser.add_argument('--trapped-escape', default='off', type=str,
                          "heading as a weighted vector sum across every "
                          "trapping obstacle, plus the old stop - the first "
                          "design tried; can point at a third, non-trapping "
-                         "obstacle neither term accounts for. 'per-obstacle' "
-                         "(recommended) computes a forward/reverse pair PER "
+                         "obstacle neither term accounts for, yet is the "
+                         "best-scoring mode measured so far (n=50, "
+                         "gamma=0.03: 38% goal vs 12% for 'per-obstacle'). "
+                         "'per-obstacle' computes a forward/reverse pair PER "
                          "trapping obstacle instead of one blended direction, "
                          "plus the old stop. 'per-obstacle-no-stop' is the "
                          "same without the stop candidate - measured worse "
                          "in a matched-seed test (collision% 10%->50%, goal% "
                          "back to the no-escape baseline), kept only so that "
-                         "result is reproducible. VO-TREE and VO-PLANNER "
+                         "result is reproducible. 'per-obstacle-nearest' is "
+                         "like 'per-obstacle' but only for the single most "
+                         "urgent trapping obstacle - exactly 3 candidates, "
+                         "matching 'blended's count, to test whether "
+                         "'blended' wins on direction quality or merely "
+                         "because fewer candidates means more simulation "
+                         "budget per candidate under the same real-time "
+                         "planning budget. VO-TREE and VO-PLANNER "
                          "only - plain MCTS has no VO pruning and therefore "
                          'no "trapped" concept to change.')
 parser.add_argument('--no-plots', action='store_true',
