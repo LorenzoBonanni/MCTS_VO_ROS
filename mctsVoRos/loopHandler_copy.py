@@ -142,9 +142,16 @@ parser.add_argument('--trapped-escape', default='off', type=str,
                          "'blended' wins on direction quality or merely "
                          "because fewer candidates means more simulation "
                          "budget per candidate under the same real-time "
-                         "planning budget. VO-TREE and VO-PLANNER "
-                         "only - plain MCTS has no VO pruning and therefore "
-                         'no "trapped" concept to change.')
+                         "planning budget. VO-TREE only: plain MCTS has no "
+                         "VO pruning and therefore no \"trapped\" concept to "
+                         "change, and VO-PLANNER stays vanilla VO regardless "
+                         "of this flag - it is reactive (no tree to weigh "
+                         "escape candidates against each other via rollout) "
+                         "so it would have to commit to one via a tie-break, "
+                         "and the obvious one (least turning wins) is wrong "
+                         "on its own terms since it ignores that max_speed "
+                         "and min_speed can differ substantially in "
+                         "magnitude.")
 parser.add_argument('--no-plots', action='store_true',
                     help='Skip the debug plots and animations at the end of a '
                          'run. Rendering the trajectory GIF takes far longer '
