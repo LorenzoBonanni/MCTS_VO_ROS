@@ -24,7 +24,8 @@ from collections import defaultdict
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm, t as t_dist
+from scipy.stats import t as t_dist
+from statsmodels.stats.proportion import proportion_confint
 
 # The goal is a constant in loopHandler_copy.py and is never written to disk, so
 # plotting has to be told where it was. This is the corrected value; runs made
@@ -147,15 +148,11 @@ def discover(root, label=""):
 # ------------------------------------------------------------------ metrics --
 
 def wilson_ci(successes, trials, alpha=0.05):
-    """Wilson score interval for a binomial proportion."""
+    """Wilson score interval for a binomial proportion, via statsmodels."""
     if trials == 0:
         return (np.nan, np.nan)
-    p = successes / trials
-    z = norm.ppf(1 - alpha / 2)
-    denominator = 1 + z**2 / trials
-    centre = (p + z**2 / (2 * trials)) / denominator
-    margin = z * np.sqrt(p * (1 - p) / trials + z**2 / (4 * trials**2)) / denominator
-    return (max(0.0, centre - margin), min(1.0, centre + margin))
+    lo, hi = proportion_confint(successes, trials, alpha=alpha, method='wilson')
+    return (max(0.0, lo), min(1.0, hi))
 
 
 def mean_ci(values, alpha=0.05):
@@ -201,7 +198,7 @@ def timing(runs, legacy_ts):
 
     Returns (dict of seconds, derived_flag).
     """
-    sense, plan, cycle, sims = [], [], [], []
+    sense, plan, cycle, run_sim_means = [], [], [], []
     derived = False
 
     for r in runs:
@@ -210,7 +207,9 @@ def timing(runs, legacy_ts):
             sense += [s["t_sense"] for s in st]
             plan += [s["t_plan"] for s in st]
             cycle += [s["t_cycle"] for s in st if not np.isnan(s.get("t_cycle", np.nan))]
-            sims += [s["n_sims"] for s in st if not np.isnan(s.get("n_sims", np.nan))]
+            run_sims = [s["n_sims"] for s in st if not np.isnan(s.get("n_sims", np.nan))]
+            if run_sims:
+                run_sim_means.append(float(np.mean(run_sims)))
             continue
 
         derived = True
@@ -222,7 +221,7 @@ def timing(runs, legacy_ts):
             cycle += [2.0 * ts] * len(times)
         sn = r.aux("sim_num_")                 # absent for VO-PLANNER: no tree
         if sn:
-            sims += list(sn)
+            run_sim_means.append(float(np.mean(sn)))
 
     def med_p99(v):
         a = np.array(v, dtype=float)
@@ -241,7 +240,10 @@ def timing(runs, legacy_ts):
         "t_cycle_med": c_med, "t_cycle_p99": c_p99,
         "hz": 1.0 / c_med if c_med and not np.isnan(c_med) and c_med > 0 else np.nan,
         "total_s": c_med * steps if not np.isnan(c_med) and not np.isnan(steps) else np.nan,
-        "sims": float(np.median(sims)) if sims else np.nan,
+        # mean-of-per-run-means, not a flat pool of every step from every run:
+        # 1) mean sims/step within each run, 2) mean those per-run means, 3) std of them.
+        "sims": float(np.mean(run_sim_means)) if run_sim_means else np.nan,
+        "sims_std": float(np.std(run_sim_means)) if run_sim_means else np.nan,
     }, derived
 
 
@@ -383,7 +385,8 @@ def summarize(runs, legacy_ts, csv_out=None, show_runs=False, runs_csv_out=None)
                          fmt(t["t_sense_p99"] * 1e3, ".3f") if not np.isnan(t["t_sense_p99"]) else "-",
                          fmt(t["t_plan_med"] * 1e3, ".1f") if not np.isnan(t["t_plan_med"]) else "-",
                          fmt(t["t_cycle_med"] * 1e3, ".1f") if not np.isnan(t["t_cycle_med"]) else "-",
-                         fmt(t["hz"], ".1f"), fmt(t["total_s"], ".0f"), fmt(t["sims"], ".0f")])
+                         fmt(t["hz"], ".1f"), fmt(t["total_s"], ".0f"),
+                         f"{fmt(t['sims'], '.0f')} ± {fmt(t['sims_std'], '.0f')}"])
 
         dep_rows.append([label,
                          fmt(mean_std(g, "meanTreeDepth")[0], ".1f"),
