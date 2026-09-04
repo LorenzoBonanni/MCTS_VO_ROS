@@ -29,14 +29,14 @@ from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from skimage.measure import CircleModel, ransac
 from functools import partial
-from MCTS_VO.bettergym.agents.utils.vo import epsilon_uniform_uniform_vo, set_legacy_vo, set_trapped_escape, robot_trapped
+from MCTS_VO.bettergym.agents.utils.vo import epsilon_uniform_uniform_vo, vo_speed, set_legacy_vo, set_trapped_escape, robot_trapped
 from rclpy.time import Time
 
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--exp_num', default=0, type=int)
 parser.add_argument('--algorithm', default='VO-PLANNER', type=str,
-                    choices=['MCTS', 'VO-TREE', 'VO-PLANNER'])
+                    choices=['MCTS', 'VO-TREE', 'VO-PLANNER', 'VO-PLANNER-SPEED'])
 parser.add_argument('--trajectories', default='sinusoidal', type=str,
                     choices=['sinusoidal', 'intention', 'sinusoidal_complex', 'intention_complex', 'sinusoidal_complex_speed', 'intention_complex_speed'],
                     help='Type of obstacle trajectories, i.e. which Unity '
@@ -528,6 +528,28 @@ class LoopHandler(Node):
                 ),
                 environment=self.sim_env
             )
+        elif algorithm == 'VO-PLANNER-SPEED':
+            _, self.sim_env = create_pedestrian_env(
+                discrete=True,
+                rwrd_in_sim=True,
+                out_boundaries_rwrd=-100,
+                n_vel=4,
+                n_angles=6,
+                vo=True,
+                obs_pos=None,
+                n_obs=None,
+                dt_real=self.dt,
+                think_margin=THINK_MARGIN,
+            )
+            self.config = self.sim_env.config
+            self.planner = RolloutPlanner(
+                rollout_policy=partial(
+                    vo_speed,
+                    std_angle_rollout=2.84*self.dt,
+                    eps=0
+                ),
+                environment=self.sim_env
+            )
         else:
             raise Exception('Invalid Algorithm')
 
@@ -551,7 +573,7 @@ class LoopHandler(Node):
         # ts plus the thinking time, not ts. In the paper configuration thinking
         # is given a whole ts, hence the original hard-coded 2*dt.
         self.t_timer = self.dt + THINK_MARGIN
-        if algorithm != 'VO-PLANNER':
+        if algorithm != 'VO-PLANNER' and algorithm != 'VO-PLANNER-SPEED':
             self.timer = self.create_timer(self.t_timer, self.control_loop)
         else:
             self.timer = self.create_timer(self.t_timer, self.control_loop_vo_planner)
@@ -1453,8 +1475,7 @@ def main(args=None):
         env['MCTSVO_POS_LOG_PATH'] = os.path.abspath(pos_log_path)
         popen_kwargs['env'] = env
 
-    process = subprocess.Popen([env_build] + ENV_RENDER_ARGS[cli_args.env_render],
-                               **popen_kwargs)
+    process = subprocess.Popen([env_build] + ENV_RENDER_ARGS[cli_args.env_render], **popen_kwargs)
     time.sleep(2)
     try:
         executor = SingleThreadedExecutor()
