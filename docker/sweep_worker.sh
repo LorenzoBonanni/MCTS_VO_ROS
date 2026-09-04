@@ -43,6 +43,7 @@ esac
 : "${ALGORITHM:?export ALGORITHM}"
 : "${NUM_EXP:?export NUM_EXP}"
 : "${MAX_OBS_RADIUS:?export MAX_OBS_RADIUS}"
+LOG_POSITIONS="${LOG_POSITIONS:-0}"
 REPO="$MCTSVO_REPO"
 
 # --------------------------------------------------
@@ -216,6 +217,7 @@ for (( exp_num = 0; exp_num < NUM_EXP; exp_num++ )); do
             --vo-geometry "$VO" \
             --max-obs-radius "$MAX_OBS_RADIUS" \
             --max-obs-vel "$MOV" \
+            $( (( LOG_POSITIONS )) && echo --log-positions ) \
             >> "$log" 2>&1
         rc=$?
         set -e
